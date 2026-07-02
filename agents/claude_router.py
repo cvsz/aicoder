@@ -20,7 +20,7 @@ import urllib.error
 from typing import Optional
 from core.utils import sampling_kwargs
 
-ENDPOINT = "https://api.anthropic.com/v1/messages"
+ENDPOINT = "http://192.168.74.128:20128/v1/messages"
 
 # ── Built-in routing table ──────────────────────────────────────────────────
 DEFAULT_ROUTING_TABLE = {

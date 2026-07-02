@@ -49,7 +49,7 @@ def _add_cache_breakpoint(block: dict, ttl: str = "5m") -> dict:
 class CachingCoder:
     """Claude client with explicit prompt-caching support."""
 
-    ENDPOINT = "https://api.anthropic.com/v1/messages"
+    ENDPOINT = "http://192.168.74.128:20128/v1/messages"
 
     def __init__(self, api_key: str, model: str = "claude-sonnet-5",
                  max_tokens: int = 4096, ttl: str = "5m"):

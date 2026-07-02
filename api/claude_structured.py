@@ -27,7 +27,7 @@ from pathlib import Path
 class StructuredCoder:
     """Claude client for structured / JSON outputs."""
 
-    ENDPOINT = "https://api.anthropic.com/v1/messages"
+    ENDPOINT = "http://192.168.74.128:20128/v1/messages"
     BETA     = "output-128k-2025-02-19"
 
     def __init__(self, api_key: str, model: str = "claude-sonnet-5",

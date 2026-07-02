@@ -47,7 +47,7 @@ import urllib.request
 import urllib.error
 from typing import Optional
 
-MESSAGES_ENDPOINT = "https://api.anthropic.com/v1/messages"
+MESSAGES_ENDPOINT = "http://192.168.74.128:20128/v1/messages"
 
 FABLE5_MODEL_ID = "claude-fable-5"
 MYTHOS5_MODEL_ID = "claude-mythos-5"

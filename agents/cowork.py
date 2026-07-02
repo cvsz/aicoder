@@ -37,7 +37,7 @@ from pathlib import Path
 from typing import Optional
 
 
-ENDPOINT = "https://api.anthropic.com/v1/messages"
+ENDPOINT = "http://192.168.74.128:20128/v1/messages"
 
 
 # ── Task type registry ─────────────────────────────────────────────────────

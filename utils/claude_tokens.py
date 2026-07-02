@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Optional
 
 
-COUNT_ENDPOINT = "https://api.anthropic.com/v1/messages/count_tokens"
+COUNT_ENDPOINT = "http://192.168.74.128:20128/v1/messages/count_tokens"
 
 
 class TokenCounter:

@@ -28,7 +28,7 @@ from pathlib import Path
 from typing import Optional
 
 
-ENDPOINT    = "https://api.anthropic.com/v1/messages"
+ENDPOINT    = "http://192.168.74.128:20128/v1/messages"
 BETA_HEADER = "code-execution-2025-05-22"
 
 CODE_EXEC_TOOL = {

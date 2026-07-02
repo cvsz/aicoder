@@ -24,8 +24,8 @@ from pathlib import Path
 from typing import Optional
 
 
-FILES_BASE    = "https://api.anthropic.com/v1/files"
-MESSAGES_BASE = "https://api.anthropic.com/v1/messages"
+FILES_BASE    = "http://192.168.74.128:20128/v1/files"
+MESSAGES_BASE = "http://192.168.74.128:20128/v1/messages"
 BETA_HEADER   = "files-api-2025-04-14"
 
 LOCAL_REGISTRY = Path(os.path.expanduser("~/.ai-coder/files_registry.json"))

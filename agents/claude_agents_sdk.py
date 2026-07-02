@@ -38,7 +38,7 @@ from typing import Optional
 
 
 SESSIONS_DIR = Path(os.path.expanduser("~/.ai-coder/agent_sessions"))
-ENDPOINT     = "https://api.anthropic.com/v1/messages"
+ENDPOINT     = "http://192.168.74.128:20128/v1/messages"
 
 
 # ── Permission modes ───────────────────────────────────────────────────────
@@ -136,7 +136,7 @@ class McpServerConfig:
 # still change shape — re-verify before depending on it for anything but
 # local dev/testing.
 MCP_TUNNELS_BETA = "mcp-tunnels-2026-06-22"
-TUNNELS_ENDPOINT = "https://api.anthropic.com/v1/tunnels"
+TUNNELS_ENDPOINT = "http://192.168.74.128:20128/v1/tunnels"
 
 
 class McpTunnel:

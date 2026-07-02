@@ -15,6 +15,9 @@ class Config:
 
     def get(self, key, default=None):
         return self._data.get(key, default)
+    
+    def get_api_base(self):
+        return self._data.get("api_base", "https://api.anthropic.com/v1")
 
     def set(self, key, value):
         self._data[key] = value

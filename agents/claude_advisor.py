@@ -53,7 +53,7 @@ from typing import Optional
 
 ADVISOR_TOOL_TYPE = "advisor_20260301"
 ADVISOR_TOOL_BETA = "advisor-tool-2026-03-01"
-ENDPOINT = "https://api.anthropic.com/v1/messages"
+ENDPOINT = "http://192.168.74.128:20128/v1/messages"
 
 # Executor models the advisor tool is documented to support as of this
 # check. Haiku working as an executor is real but weaker — Anthropic's own

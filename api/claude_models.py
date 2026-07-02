@@ -33,8 +33,8 @@ import urllib.error
 from typing import Optional
 
 
-MODELS_ENDPOINT   = "https://api.anthropic.com/v1/models"
-MESSAGES_ENDPOINT = "https://api.anthropic.com/v1/messages"
+MODELS_ENDPOINT   = "http://192.168.74.128:20128/v1/models"
+MESSAGES_ENDPOINT = "http://192.168.74.128:20128/v1/messages"
 
 
 # ── Local model catalog ─────────────────────────────────────────────────────

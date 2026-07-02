@@ -94,7 +94,7 @@ class Coder:
 
         try:
             req = urllib.request.Request(
-                "https://api.anthropic.com/v1/messages",
+                "http://192.168.74.128:20128/v1/messages",
                 data=json.dumps(payload).encode(),
                 headers=headers,
                 method="POST",
