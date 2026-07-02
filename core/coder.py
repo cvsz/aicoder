@@ -10,6 +10,13 @@ from core.config import Config
 from utils.sampling_kwargs import sampling_kwargs
 
 
+class CoreEngine:
+    def __init__(self, args):
+        self.args = args
+
+    def run(self):
+        pass
+
 class Coder:
     def __init__(self, api_key=None, model=None, temperature=0.3, max_tokens=4096,
                  provider=None, personality_style=None,
