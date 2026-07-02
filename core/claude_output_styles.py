@@ -100,7 +100,7 @@ def discover_custom_styles() -> dict:
                 if style:
                     out[style["name"]] = style
     try:
-        from claude_plugins import load_plugin_output_styles
+        from core.claude_plugins import load_plugin_output_styles
         for entry in load_plugin_output_styles():
             style = _parse_style_file(Path(entry["path"]))
             if style:

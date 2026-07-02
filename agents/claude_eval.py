@@ -12,7 +12,7 @@ from typing import Any, Dict, List, Optional
 from dataclasses import dataclass, field
 from datetime import datetime
 import anthropic
-from utils import sampling_kwargs
+from core.utils import sampling_kwargs
 
 EVALS_DIR = Path.home() / ".ai-coder" / "evals"
 

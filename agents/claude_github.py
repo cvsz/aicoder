@@ -15,7 +15,7 @@ CLI flags:
   --gh-max-items N              Max issues/commits to process (default: 20)
 """
 
-from utils import sampling_kwargs
+from core.utils import sampling_kwargs
 
 import json
 import os

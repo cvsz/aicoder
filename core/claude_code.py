@@ -392,7 +392,7 @@ class McpConnector:
             except Exception as e:
                 print(f"  [WARN] .mcp.json parse error: {e}")
         try:
-            from claude_plugins import load_plugin_mcp_servers
+            from core.claude_plugins import load_plugin_mcp_servers
             mc.servers.update(load_plugin_mcp_servers())
         except ImportError:
             pass
@@ -455,7 +455,7 @@ class SubagentRegistry:
 
         # Plugin-bundled agents (.claude/plugins/installed/<plugin>/agents/*.md)
         try:
-            from claude_plugins import load_plugin_agents
+            from core.claude_plugins import load_plugin_agents
             for entry in load_plugin_agents():
                 self._load_one(Path(entry["path"]), plugin=entry["plugin"],
                                namespace=f"{entry['plugin']}:{entry['name']}")
@@ -557,7 +557,7 @@ class SkillsRegistry:
                 "path": "", "source": "anthropic",
             }
         try:
-            from claude_plugins import load_plugin_skills
+            from core.claude_plugins import load_plugin_skills
             for entry in load_plugin_skills():
                 content = Path(entry["path"]).read_text()
                 desc = next((l.lstrip("# ").strip()
@@ -805,7 +805,7 @@ class CodeAgent:
                 timeout = inputs.get("timeout", 30)
                 if os.environ.get("AI_CODER_SANDBOX") == "1":
                     try:
-                        from claude_sandbox import enforce, SandboxViolation
+                        from core.claude_sandbox import enforce, SandboxViolation
                         roots = json.loads(os.environ.get("AI_CODER_SANDBOX_ROOTS", "[]"))
                         allow_net = os.environ.get("AI_CODER_SANDBOX_NET") == "1"
                         enforce(cmd, cwd, allow_net=allow_net, extra_roots=roots)
@@ -1079,7 +1079,7 @@ def cmd_code_agent(
     # Output style: append style instructions to the session's system prompt
     if output_style:
         try:
-            from claude_output_styles import system_prompt_fragment
+            from core.claude_output_styles import system_prompt_fragment
             fragment = system_prompt_fragment(output_style)
             if fragment:
                 session.system_prompt = (session.system_prompt + "\n\n" + fragment).strip()
@@ -1109,7 +1109,7 @@ def cmd_code_agent(
 
     # Plugin bin/ dirs onto PATH for the duration of this run
     try:
-        from claude_plugins import plugin_bin_paths
+        from core.claude_plugins import plugin_bin_paths
         extra_bins = plugin_bin_paths()
         if extra_bins:
             os.environ["PATH"] = os.pathsep.join(extra_bins) + os.pathsep + os.environ.get("PATH", "")
@@ -1250,13 +1250,13 @@ def cmd_code_slash(command: str, api_key: str, model: str,
         elif cmd == "doctor":
             _run_doctor()
         elif cmd == "plugin":
-            from claude_plugins import cmd_plugin_list
+            from core.claude_plugins import cmd_plugin_list
             cmd_plugin_list()
         elif cmd == "output-style":
-            from claude_output_styles import cmd_list_output_styles
+            from core.claude_output_styles import cmd_list_output_styles
             cmd_list_output_styles()
         elif cmd == "statusline":
-            from claude_settings import cmd_status_line
+            from core.claude_settings import cmd_status_line
             cmd_status_line(model=model, cwd=cwd)
         return
 
@@ -1276,7 +1276,7 @@ def cmd_code_slash(command: str, api_key: str, model: str,
                     return
 
     try:
-        from claude_plugins import load_plugin_commands
+        from core.claude_plugins import load_plugin_commands
         for entry in load_plugin_commands():
             if entry["name"] == cmd or entry["name"].split(":", 1)[-1] == cmd:
                 content = Path(entry["path"]).read_text()
@@ -1368,7 +1368,7 @@ def _run_doctor():
         ("Sessions dir",           SESSIONS_DIR.exists()),
     ]
     try:
-        from claude_plugins import plugin_list, marketplace_list
+        from core.claude_plugins import plugin_list, marketplace_list
         checks.append(("Plugins installed", len(plugin_list()) > 0))
         checks.append(("Marketplaces registered", len(marketplace_list()) > 0))
     except ImportError:

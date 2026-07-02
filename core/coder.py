@@ -6,8 +6,8 @@ import os
 import json
 import urllib.request
 import urllib.error
-from config import Config
-from utils import sampling_kwargs
+from core.config import Config
+from utils.sampling_kwargs import sampling_kwargs
 
 
 class Coder:
@@ -49,7 +49,7 @@ class Coder:
 
         if self.personality_style:
             try:
-                from personalities import PersonalityManager
+                from core.personalities import PersonalityManager
                 pm = PersonalityManager()
                 addition = pm.build_prompt_addition(self.personality_style)
                 if addition and system:

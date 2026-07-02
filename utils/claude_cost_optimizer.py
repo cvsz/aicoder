@@ -19,7 +19,7 @@ from typing import Dict, Optional, Tuple
 from dataclasses import dataclass, field
 from datetime import datetime
 import anthropic
-from utils import sampling_kwargs
+from core.utils import sampling_kwargs
 
 SPEND_LOG = Path.home() / ".ai-coder" / "cost_log.json"
 

@@ -39,7 +39,7 @@ import urllib.request
 import urllib.error
 from typing import Optional
 
-from claude_fable5 import MESSAGES_ENDPOINT, FABLE_MYTHOS_INFO, MYTHOS5_MODEL_ID
+from agents.claude_fable5 import MESSAGES_ENDPOINT, FABLE_MYTHOS_INFO, MYTHOS5_MODEL_ID
 
 # Re-exported for convenience so callers don't need to import claude_fable5
 # directly just to get the model ID or info table.

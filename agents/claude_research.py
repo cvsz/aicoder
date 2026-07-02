@@ -5,7 +5,7 @@ then synthesize into a cited Markdown report.
 AI Model Coder CLI v1.10.0
 """
 
-from utils import sampling_kwargs
+from core.utils import sampling_kwargs
 
 import json
 import urllib.request

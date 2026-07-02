@@ -13,7 +13,7 @@ import sys
 # so importing them eagerly to build argparse `choices=` is cheap and keeps
 # the CLI's advertised choices in sync with the actual data instead of a
 # second hardcoded list drifting from it.
-from personalities import PERSONALITIES
+from core.personalities import PERSONALITIES
 
 VERSION = "1.12.1"
 BANNER  = f"\033[94mAI Model Coder CLI v{VERSION}\033[0m"
@@ -503,7 +503,7 @@ def main():
 
     # ── No-key listing ──
     if args.list_skills:
-        from skills import SkillManager
+        from core.skills import SkillManager
         for s in SkillManager().list_skills():
             print(f"  {s['name']:<25} — {s['description']}")
         return
@@ -515,7 +515,7 @@ def main():
             print(f"  {n:<25} — {sys_prompt}")
         return
     if args.list_personalities:
-        from personalities import PersonalityManager
+        from core.personalities import PersonalityManager
         for p_ in PersonalityManager().list_personalities():
             print(f"  {p_['name']:<12} — {p_['description']}")
         return
@@ -583,22 +583,22 @@ def main():
                         apply=args.upgrade_yes, no_backup=args.upgrade_no_backup); return
 
     if args.project_list:
-        from projects import cmd_project_list; cmd_project_list(); return
+        from core.projects import cmd_project_list; cmd_project_list(); return
     if args.project_templates:
-        from projects import cmd_project_templates; cmd_project_templates(); return
+        from core.projects import cmd_project_templates; cmd_project_templates(); return
     if args.project_show:
-        from projects import cmd_project_show; cmd_project_show(args.project_show); return
+        from core.projects import cmd_project_show; cmd_project_show(args.project_show); return
     if args.project_delete:
-        from projects import ProjectManager; ProjectManager().delete_project(args.project_delete)
+        from core.projects import ProjectManager; ProjectManager().delete_project(args.project_delete)
         print("✓ Deleted."); return
     if args.project_archive:
-        from projects import ProjectManager; ProjectManager().archive_project(args.project_archive)
+        from core.projects import ProjectManager; ProjectManager().archive_project(args.project_archive)
         print("✓ Archived."); return
     if args.project_create:
-        from projects import cmd_project_create
+        from core.projects import cmd_project_create
         cmd_project_create(args.project_create, args.project_desc, args.project_template); return
     if args.project_add_task:
-        from projects import cmd_project_add_task
+        from core.projects import cmd_project_add_task
         cmd_project_add_task(args.project_add_task, args.task_title or args.prompt or "",
                              args.task_desc, args.task_agent, args.task_priority); return
     if args.artifact_types:
@@ -630,70 +630,70 @@ def main():
     if args.list_server_tools:
         from core.claude_tools import cmd_list_server_tools; cmd_list_server_tools(); return
     if args.cowork_list:
-        from cowork import cmd_cowork_list; cmd_cowork_list(); return
+        from agents.cowork import cmd_cowork_list; cmd_cowork_list(); return
     if args.agent_list_sessions:
         from agents.claude_agents_sdk import cmd_agent_list_sessions; cmd_agent_list_sessions(); return
     if args.list_tool_presets:
         from agents.claude_agents_sdk import cmd_list_tool_presets; cmd_list_tool_presets(); return
     if args.code_agent_list_sessions:
-        from claude_code import cmd_code_list_sessions; cmd_code_list_sessions(); return
+        from core.claude_code import cmd_code_list_sessions; cmd_code_list_sessions(); return
     if args.code_agent_list_tools:
-        from claude_code import cmd_code_list_tools; cmd_code_list_tools(); return
+        from core.claude_code import cmd_code_list_tools; cmd_code_list_tools(); return
 
     # ── New in v1.10.0 — no API key required ──
     if args.memory_add:
-        from claude_memory import cmd_memory_add
+        from core.claude_memory import cmd_memory_add
         cmd_memory_add(args.memory_add, args.memory_type, args.memory_tags,
                        args.memory_importance, args.memory_ns); return
     if args.memory_recall:
-        from claude_memory import cmd_memory_recall
+        from core.claude_memory import cmd_memory_recall
         cmd_memory_recall(args.memory_recall, args.memory_ns); return
     if args.memory_forget:
-        from claude_memory import cmd_memory_forget
+        from core.claude_memory import cmd_memory_forget
         cmd_memory_forget(args.memory_forget, args.memory_ns); return
     if args.memory_stats:
-        from claude_memory import cmd_memory_stats; cmd_memory_stats(args.memory_ns); return
+        from core.claude_memory import cmd_memory_stats; cmd_memory_stats(args.memory_ns); return
     if args.memory_retention:
-        from claude_memory import cmd_memory_retention; cmd_memory_retention(args.memory_ns); return
+        from core.claude_memory import cmd_memory_retention; cmd_memory_retention(args.memory_ns); return
     if args.sessions_list:
-        from claude_sessions import cmd_sessions_list; cmd_sessions_list(); return
+        from agents.claude_sessions import cmd_sessions_list; cmd_sessions_list(); return
     if args.session_show:
-        from claude_sessions import cmd_session_show; cmd_session_show(args.session_show); return
+        from agents.claude_sessions import cmd_session_show; cmd_session_show(args.session_show); return
     if args.checkpoint_list:
-        from claude_sessions import cmd_checkpoint_list; cmd_checkpoint_list(args.checkpoint_list); return
+        from agents.claude_sessions import cmd_checkpoint_list; cmd_checkpoint_list(args.checkpoint_list); return
     if args.away_summary:
-        from claude_sessions import cmd_away_summary; cmd_away_summary(args.away_summary); return
+        from agents.claude_sessions import cmd_away_summary; cmd_away_summary(args.away_summary); return
     if args.rag_index and args.rag_folder:
-        from claude_rag import cmd_rag_index; cmd_rag_index(args.rag_index, args.rag_folder); return
+        from agents.claude_rag import cmd_rag_index; cmd_rag_index(args.rag_index, args.rag_folder); return
     if args.rag_list:
-        from claude_rag import cmd_rag_list; cmd_rag_list(); return
+        from agents.claude_rag import cmd_rag_list; cmd_rag_list(); return
     if args.eval_list:
-        from claude_eval import cmd_eval_list; cmd_eval_list(); return
+        from agents.claude_eval import cmd_eval_list; cmd_eval_list(); return
     if args.eval_scaffold:
-        from claude_eval import cmd_eval_scaffold; cmd_eval_scaffold(args.eval_scaffold); return
+        from agents.claude_eval import cmd_eval_scaffold; cmd_eval_scaffold(args.eval_scaffold); return
     if args.cost_summary:
-        from claude_cost_optimizer import cmd_cost_summary; cmd_cost_summary(); return
+        from utils.claude_cost_optimizer import cmd_cost_summary; cmd_cost_summary(); return
     if args.cost_reset:
-        from claude_cost_optimizer import cmd_cost_reset; cmd_cost_reset(); return
+        from utils.claude_cost_optimizer import cmd_cost_reset; cmd_cost_reset(); return
     if args.obs_latency:
-        from claude_observability import cmd_obs_latency; cmd_obs_latency(args.obs_hours); return
+        from utils.claude_observability import cmd_obs_latency; cmd_obs_latency(args.obs_hours); return
     if args.obs_tail is not None:
-        from claude_observability import cmd_obs_tail; cmd_obs_tail(args.obs_tail); return
+        from utils.claude_observability import cmd_obs_tail; cmd_obs_tail(args.obs_tail); return
     if args.obs_clear:
-        from claude_observability import cmd_obs_clear; cmd_obs_clear(); return
+        from utils.claude_observability import cmd_obs_clear; cmd_obs_clear(); return
     if args.workflow_scaffold:
-        from claude_workflow import cmd_workflow_scaffold; cmd_workflow_scaffold(args.workflow_scaffold); return
+        from agents.claude_workflow import cmd_workflow_scaffold; cmd_workflow_scaffold(args.workflow_scaffold); return
     if args.hooks_add:
-        from claude_hooks_perms_plan import cmd_hooks_add
+        from core.claude_hooks_perms_plan import cmd_hooks_add
         cmd_hooks_add(args.hooks_add[0], args.hooks_add[1], args.hook_tool_match); return
     if args.hooks_list:
-        from claude_hooks_perms_plan import cmd_hooks_list; cmd_hooks_list(); return
+        from core.claude_hooks_perms_plan import cmd_hooks_list; cmd_hooks_list(); return
     if args.hooks_remove is not None:
-        from claude_hooks_perms_plan import cmd_hooks_remove; cmd_hooks_remove(args.hooks_remove); return
+        from core.claude_hooks_perms_plan import cmd_hooks_remove; cmd_hooks_remove(args.hooks_remove); return
     if args.perms_list:
-        from claude_hooks_perms_plan import cmd_perms_list; cmd_perms_list(); return
+        from core.claude_hooks_perms_plan import cmd_perms_list; cmd_perms_list(); return
     if args.perms_add:
-        from claude_hooks_perms_plan import cmd_perms_add
+        from core.claude_hooks_perms_plan import cmd_perms_add
         cmd_perms_add(args.perms_add[0], args.perms_add[1], args.perms_reason); return
 
     # ── API key required ──
@@ -715,7 +715,7 @@ def main():
 
     # ── zai-live ──
     if args.live:
-        from claude_live import cmd_live
+        from agents.claude_live import cmd_live
         # --temperature was accepted by the parser but never reached cmd_live,
         # so live mode always used LiveSession's 0.7 default regardless of the
         # flag. Now threaded through (still safely dropped by sampling_kwargs()
@@ -724,62 +724,62 @@ def main():
 
     # ── Deep Research ──
     if args.research:
-        from claude_research import cmd_research
+        from agents.claude_research import cmd_research
         cmd_research(args.research, key, model, depth=args.research_depth,
                      source_urls=args.research_urls, output=args.output); return
 
     # ── RAG (query needs the key for generation; index/list handled above) ──
     if args.rag_query:
-        from claude_rag import cmd_rag_query
+        from agents.claude_rag import cmd_rag_query
         cmd_rag_query(args.rag_index_name, args.rag_query, key, model, k=args.rag_k); return
 
     # ── Evaluation (run/compare call the model; list/scaffold handled above) ──
     if args.eval_run:
-        from claude_eval import cmd_eval_run
+        from agents.claude_eval import cmd_eval_run
         cmd_eval_run(args.eval_run, key, model, threshold=args.eval_threshold, output=args.output); return
     if args.eval_compare:
-        from claude_eval import cmd_eval_compare
+        from agents.claude_eval import cmd_eval_compare
         cmd_eval_compare(args.eval_run or args.eval_scaffold or "", args.eval_compare[0],
                          args.eval_compare[1], key); return
 
     # ── Git Integration ──
     if args.git_commit:
-        from claude_git import cmd_git_commit
+        from agents.claude_git import cmd_git_commit
         cmd_git_commit(key, model, style=args.git_commit_style, write=args.git_commit_write); return
     if args.git_pr:
-        from claude_git import cmd_git_pr; cmd_git_pr(args.git_pr[0], args.git_pr[1], key, model); return
+        from agents.claude_git import cmd_git_pr; cmd_git_pr(args.git_pr[0], args.git_pr[1], key, model); return
     if args.git_changelog:
-        from claude_git import cmd_git_changelog
+        from agents.claude_git import cmd_git_changelog
         cmd_git_changelog(args.git_changelog, key, model, output=args.output); return
     if args.git_review:
-        from claude_git import cmd_git_review; cmd_git_review(key, model); return
+        from agents.claude_git import cmd_git_review; cmd_git_review(key, model); return
     if args.git_blame_explain:
-        from claude_git import cmd_git_blame_explain
+        from agents.claude_git import cmd_git_blame_explain
         f, s, e = args.git_blame_explain
         cmd_git_blame_explain(f, int(s), int(e), key, model); return
 
     # ── Cost Optimizer (optimized calls the model; summary/reset handled above) ──
     if args.optimized:
-        from claude_cost_optimizer import cmd_optimized
+        from utils.claude_cost_optimizer import cmd_optimized
         cmd_optimized(args.optimized, key, verbose=True, force_model=args.force_model); return
 
     # ── Observability (errors needs the model for analysis; rest handled above) ──
     if args.obs_errors:
-        from claude_observability import cmd_obs_errors; cmd_obs_errors(key, model, args.obs_hours); return
+        from utils.claude_observability import cmd_obs_errors; cmd_obs_errors(key, model, args.obs_hours); return
 
     # ── Workflows (run calls the model; scaffold handled above) ──
     if args.workflow_run:
-        from claude_workflow import cmd_workflow_run
+        from agents.claude_workflow import cmd_workflow_run
         cmd_workflow_run(args.workflow_run, key, input_text=args.workflow_input, output=args.output); return
 
     # ── Plan Mode ──
     if args.plan:
-        from claude_hooks_perms_plan import cmd_plan
+        from core.claude_hooks_perms_plan import cmd_plan
         cmd_plan(args.plan, key, model, context=args.plan_context,
                 execute=args.plan_execute, output=args.output); return
 
     if args.thinking or args.adaptive:
-        from claude_thinking import cmd_thinking
+        from core.claude_thinking import cmd_thinking
         prompt = args.prompt or (args.file and _read_file(args.file)) or ""
         cmd_thinking(prompt=prompt, api_key=key, model=model,
                      budget=args.thinking_budget, effort=args.effort or None,
@@ -791,55 +791,55 @@ def main():
                    file_content=_read_file(args.file) if args.file else None,
                    show_thinking=args.show_thinking); return
     if args.web_search or args.web_fetch:
-        from claude_search import cmd_web_search
+        from api.claude_search import cmd_web_search
         cmd_web_search(args.prompt or "", key, model,
                        max_searches=args.max_searches,
                        show_citations=not args.no_citations,
                        web_fetch=args.web_fetch); return
     if args.fetch_url:
-        from claude_search import cmd_fetch_url
+        from api.claude_search import cmd_fetch_url
         cmd_fetch_url(args.fetch_url, args.prompt or "", key, model); return
     if args.vision:
-        from claude_vision import cmd_vision
+        from api.claude_vision import cmd_vision
         cmd_vision(args.vision, args.prompt or "", key, model,
                    is_code=args.vision_code, language=args.vision_lang); return
     if args.vision_pdf:
-        from claude_vision import cmd_vision_pdf
+        from api.claude_vision import cmd_vision_pdf
         cmd_vision_pdf(args.vision_pdf, args.prompt or "", key, model); return
     if args.vision_url:
-        from claude_vision import cmd_vision_url
+        from api.claude_vision import cmd_vision_url
         cmd_vision_url(args.vision_url, args.prompt or "", key, model); return
     if args.vision_compare:
-        from claude_vision import cmd_vision_compare
+        from api.claude_vision import cmd_vision_compare
         cmd_vision_compare(args.vision_compare, args.prompt or "", key, model); return
     if args.vision_ocr:
-        from claude_vision import cmd_vision_ocr
+        from api.claude_vision import cmd_vision_ocr
         cmd_vision_ocr(args.vision_ocr, key, model); return
     if args.batch_submit:
-        from claude_batch import cmd_batch_submit
+        from api.claude_batch import cmd_batch_submit
         cmd_batch_submit(args.batch_submit, key, model,
                          use_300k_output=args.batch_300k_output); return
     if args.batch_status:
-        from claude_batch import cmd_batch_status
+        from api.claude_batch import cmd_batch_status
         cmd_batch_status(args.batch_status, key); return
     if args.batch_results:
-        from claude_batch import cmd_batch_results
+        from api.claude_batch import cmd_batch_results
         cmd_batch_results(args.batch_results, key, save_to=args.output or None); return
     if args.batch_cancel:
-        from claude_batch import cmd_batch_cancel
+        from api.claude_batch import cmd_batch_cancel
         cmd_batch_cancel(args.batch_cancel, key); return
     if args.batch_list:
-        from claude_batch import cmd_batch_list; cmd_batch_list(key); return
+        from api.claude_batch import cmd_batch_list; cmd_batch_list(key); return
     if args.batch_generate > 0:
-        from claude_batch import cmd_batch_generate
+        from api.claude_batch import cmd_batch_generate
         cmd_batch_generate(args.prompt or "", args.batch_generate, key, model,
                            wait=args.batch_wait); return
     if args.cache_warm:
-        from claude_cache import cmd_cache_warm
+        from api.claude_cache import cmd_cache_warm
         cmd_cache_warm(key, model, system=args.cache_system or None,
                        doc_files=args.cache_docs or [], ttl=args.cache_ttl); return
     if args.cache:
-        from claude_cache import cmd_cache_generate
+        from api.claude_cache import cmd_cache_generate
         docs = [open(f).read() for f in (args.cache_docs or [])]
         cmd_cache_generate(args.prompt or "", key, model,
                            system=args.cache_system or None, docs=docs,
@@ -868,20 +868,20 @@ def main():
         cmd_memory_agent(args.memory_agent, key, model,
                          memory_dir=args.memory_dir, max_turns=args.max_turns); return
     if args.advisor:
-        from claude_advisor import cmd_advisor
+        from agents.claude_advisor import cmd_advisor
         cmd_advisor(args.advisor, key, model,
                    advisor_model=args.advisor_model,
                    max_uses=args.advisor_max_uses or None,
                    advisor_max_tokens=args.advisor_max_tokens or None); return
     if args.embed:
-        from claude_embeddings import cmd_embed
+        from utils.claude_embeddings import cmd_embed
         cmd_embed(args.embed, model=args.embed_model, input_type=args.embed_input_type); return
     if args.embed_file:
-        from claude_embeddings import cmd_embed_file
+        from utils.claude_embeddings import cmd_embed_file
         cmd_embed_file(args.embed_file, model=args.embed_model,
                        input_type=args.embed_input_type); return
     if args.embed_similarity:
-        from claude_embeddings import cmd_embed_similarity
+        from utils.claude_embeddings import cmd_embed_similarity
         cmd_embed_similarity(args.embed_similarity[0], args.embed_similarity[1],
                              model=args.embed_model); return
     if args.stream_tools:
@@ -892,46 +892,46 @@ def main():
             tool_defs = [tool_defs]
         cmd_stream_tools(args.stream_tools, tool_defs, key, model); return
     if args.structured:
-        from claude_structured import cmd_structured
+        from api.claude_structured import cmd_structured
         cmd_structured(args.prompt or "", key, model,
                        schema_path=args.schema, schema_inline=args.schema_inline); return
     if args.structured_analyse:
-        from claude_structured import cmd_structured_analyse
+        from api.claude_structured import cmd_structured_analyse
         cmd_structured_analyse(args.structured_analyse, key, model); return
     if args.structured_extract:
-        from claude_structured import cmd_structured_extract
+        from api.claude_structured import cmd_structured_extract
         cmd_structured_extract(args.structured_extract, args.schema, key, model); return
     if args.file_upload:
-        from claude_files import cmd_file_upload
+        from api.claude_files import cmd_file_upload
         cmd_file_upload(args.file_upload, key, model); return
     if args.file_list:
-        from claude_files import cmd_file_list; cmd_file_list(key, model); return
+        from api.claude_files import cmd_file_list; cmd_file_list(key, model); return
     if args.file_delete:
-        from claude_files import cmd_file_delete; cmd_file_delete(args.file_delete, key); return
+        from api.claude_files import cmd_file_delete; cmd_file_delete(args.file_delete, key); return
     if args.file_ask:
-        from claude_files import cmd_file_ask
+        from api.claude_files import cmd_file_ask
         cmd_file_ask(args.file_ask, args.prompt or "Summarise.", key, model,
                      media_type=args.file_media_type); return
     if args.file_download:
-        from claude_files import cmd_file_download
+        from api.claude_files import cmd_file_download
         cmd_file_download(args.file_download,
                           args.file_output or args.output or f"{args.file_download}.bin", key); return
     if args.code_exec:
-        from claude_code_exec import cmd_code_exec
+        from core.claude_code_exec import cmd_code_exec
         cmd_code_exec(args.prompt or "", key, model,
                       output_dir=args.code_exec_output or None); return
     if args.code_debug:
-        from claude_code_exec import cmd_code_debug
+        from core.claude_code_exec import cmd_code_debug
         cmd_code_debug(args.code_debug, key, model); return
     if args.count_tokens:
-        from claude_tokens import cmd_count_tokens
+        from utils.claude_tokens import cmd_count_tokens
         cmd_count_tokens(args.prompt or "", key, model,
                          file_path=args.file, budget=args.count_budget or None); return
     if args.cite:
-        from claude_citations import cmd_cite
+        from api.claude_citations import cmd_cite
         cmd_cite(args.prompt or "", args.cite, key, model); return
     if args.rag:
-        from claude_citations import cmd_rag
+        from api.claude_citations import cmd_rag
         cmd_rag(args.prompt or "", args.rag, key, model, pattern=args.rag_pattern); return
     if args.computer_use:
         from api.claude_models import cmd_computer_use
@@ -956,7 +956,7 @@ def main():
         from agents.claude_agents_sdk import cmd_managed_agent_run
         cmd_managed_agent_run(args.agent_managed_run, key, model=model); return
     if args.cowork:
-        from cowork import cmd_cowork
+        from agents.cowork import cmd_cowork
         prompt = args.cowork_prompt or args.prompt or ""
         if not prompt:
             print("[ERROR] --cowork requires -p or --cowork-prompt"); sys.exit(1)
@@ -969,7 +969,7 @@ def main():
         from agents.claude_agents_sdk import cmd_mcp_tunnel_open
         cmd_mcp_tunnel_open(key, args.code_agent_mcp_tunnel); return
     if args.code_agent or args.code_agent_session or args.code_agent_resume:
-        from claude_code import cmd_code_agent
+        from core.claude_code import cmd_code_agent
         prompt = args.prompt or ""
         if not prompt:
             print("[ERROR] --code-agent requires -p PROMPT"); sys.exit(1)
@@ -992,32 +992,32 @@ def main():
             headless=args.code_agent_headless,
         ); return
     if args.code_agent_subagent:
-        from claude_code import cmd_code_subagent
+        from core.claude_code import cmd_code_subagent
         cmd_code_subagent(args.code_agent_subagent, key, model,
                           cwd=args.code_agent_cwd); return
     if args.code_agent_todo:
-        from claude_code import cmd_code_todo
+        from core.claude_code import cmd_code_todo
         cmd_code_todo(args.code_agent_todo, key, model); return
     if args.code_agent_slash:
-        from claude_code import cmd_code_slash
+        from core.claude_code import cmd_code_slash
         cmd_code_slash(args.code_agent_slash, key, model,
                        cwd=args.code_agent_cwd, prompt=args.prompt or ""); return
     if args.code_agent_cost:
-        from claude_code import cmd_code_cost
+        from core.claude_code import cmd_code_cost
         cmd_code_cost(key); return
 
     if args.project_plan:
-        from projects import cmd_project_plan
-        from coder import Coder
+        from core.projects import cmd_project_plan
+        from core.coder import Coder
         cmd_project_plan(args.project_plan, Coder(api_key=key, model=model)); return
     if args.project_run:
-        from projects import cmd_project_run
-        from coder import Coder
+        from core.projects import cmd_project_run
+        from core.coder import Coder
         cmd_project_run(args.project_run, args.task or "all",
                         Coder(api_key=key, model=model)); return
     if args.artifact_create:
         from artifacts import cmd_artifact_create
-        from coder import Coder
+        from core.coder import Coder
         if not args.prompt:
             print("[ERROR] --artifact-create requires -p"); sys.exit(1)
         tags = [t.strip() for t in args.artifact_tags.split(",") if t.strip()]
@@ -1028,12 +1028,12 @@ def main():
                             coder=Coder(api_key=key, model=model)); return
     if args.artifact_iterate:
         from artifacts import cmd_artifact_iterate
-        from coder import Coder
+        from core.coder import Coder
         cmd_artifact_iterate(args.artifact_iterate, args.prompt or "",
                              Coder(api_key=key, model=model)); return
 
     if args.prompt or args.file:
-        from coder import Coder
+        from core.coder import Coder
         c = Coder(api_key=key, model=model,
                   temperature=args.temperature, max_tokens=args.max_tokens,
                   service_tier=args.service_tier, inference_geo=args.inference_geo,
@@ -1046,7 +1046,7 @@ def main():
         # and discarded.
         system_parts = []
         if args.skill:
-            from skills import SkillManager
+            from core.skills import SkillManager
             skill = SkillManager().get_skill(args.skill)
             if skill:
                 system_parts.append(f"Skill focus — {skill['name']}: {skill['description']}")

@@ -7,7 +7,7 @@ AI Model Coder CLI v1.10.0
 import subprocess
 from typing import Optional
 import anthropic
-from utils import sampling_kwargs
+from core.utils import sampling_kwargs
 
 SYS = ("You are a senior software engineer writing git artifacts. "
        "Be concise, specific, and follow conventional commit conventions where applicable.")
