@@ -61,7 +61,7 @@ def _read_file(path):
 
 
 def build_parser():
-    from claude_models import UPGRADE_TARGETS
+    from api.claude_models import UPGRADE_TARGETS
     p = argparse.ArgumentParser(prog="ai-coder",
         description=f"AI Model Coder CLI v{VERSION}",
         formatter_class=argparse.RawTextHelpFormatter)
@@ -522,63 +522,63 @@ def main():
 
     # ── Plugins & Marketplaces (no API key required) ──
     if args.plugin_marketplace_add:
-        from claude_plugins import cmd_plugin_marketplace_add
+        from core.claude_plugins import cmd_plugin_marketplace_add
         cmd_plugin_marketplace_add(args.plugin_marketplace_add, args.plugin_marketplace_name); return
     if args.plugin_marketplace_list:
-        from claude_plugins import cmd_plugin_marketplace_list
+        from core.claude_plugins import cmd_plugin_marketplace_list
         cmd_plugin_marketplace_list(); return
     if args.plugin_marketplace_remove:
-        from claude_plugins import cmd_plugin_marketplace_remove
+        from core.claude_plugins import cmd_plugin_marketplace_remove
         cmd_plugin_marketplace_remove(args.plugin_marketplace_remove); return
     if args.plugin_install:
-        from claude_plugins import cmd_plugin_install
+        from core.claude_plugins import cmd_plugin_install
         cmd_plugin_install(args.plugin_install); return
     if args.plugin_dir:
-        from claude_plugins import cmd_plugin_install_dir
+        from core.claude_plugins import cmd_plugin_install_dir
         cmd_plugin_install_dir(args.plugin_dir); return
     if args.plugin_uninstall:
-        from claude_plugins import cmd_plugin_uninstall
+        from core.claude_plugins import cmd_plugin_uninstall
         cmd_plugin_uninstall(args.plugin_uninstall); return
     if args.plugin_list:
-        from claude_plugins import cmd_plugin_list
+        from core.claude_plugins import cmd_plugin_list
         cmd_plugin_list(); return
     if args.plugin_info:
-        from claude_plugins import cmd_plugin_info
+        from core.claude_plugins import cmd_plugin_info
         cmd_plugin_info(args.plugin_info); return
     if args.plugin_enable:
-        from claude_plugins import cmd_plugin_enable
+        from core.claude_plugins import cmd_plugin_enable
         cmd_plugin_enable(args.plugin_enable); return
     if args.plugin_disable:
-        from claude_plugins import cmd_plugin_disable
+        from core.claude_plugins import cmd_plugin_disable
         cmd_plugin_disable(args.plugin_disable); return
     if args.plugin_validate:
-        from claude_plugins import cmd_plugin_validate
+        from core.claude_plugins import cmd_plugin_validate
         cmd_plugin_validate(args.plugin_validate); return
 
     # ── Settings (no API key required) ──
     if args.settings_show:
-        from claude_settings import cmd_settings_show
+        from core.claude_settings import cmd_settings_show
         cmd_settings_show(); return
     if args.status_line:
-        from claude_settings import cmd_status_line
+        from core.claude_settings import cmd_status_line
         cmd_status_line(model=args.model or "claude-sonnet-5", cwd=args.code_agent_cwd); return
     if args.list_output_styles:
-        from claude_output_styles import cmd_list_output_styles
+        from core.claude_output_styles import cmd_list_output_styles
         cmd_list_output_styles(); return
 
     if args.fable5_info:
-        from claude_fable5 import cmd_fable5_info
+        from agents.claude_fable5 import cmd_fable5_info
         cmd_fable5_info(); return
 
     if args.mythos5_info:
-        from claude_mythos5 import cmd_mythos5_info
+        from agents.claude_mythos5 import cmd_mythos5_info
         cmd_mythos5_info(); return
 
     if args.check_deprecated:
-        from claude_models import cmd_check_deprecated
+        from api.claude_models import cmd_check_deprecated
         cmd_check_deprecated(args.check_deprecated); return
     if args.upgrade_all:
-        from claude_models import cmd_upgrade_all
+        from api.claude_models import cmd_upgrade_all
         cmd_upgrade_all(args.upgrade_all, target=args.upgrade_target,
                         apply=args.upgrade_yes, no_backup=args.upgrade_no_backup); return
 
@@ -628,13 +628,13 @@ def main():
         from artifacts import cmd_artifact_attach
         cmd_artifact_attach(args.artifact_attach, args.to_project); return
     if args.list_server_tools:
-        from claude_tools import cmd_list_server_tools; cmd_list_server_tools(); return
+        from core.claude_tools import cmd_list_server_tools; cmd_list_server_tools(); return
     if args.cowork_list:
         from cowork import cmd_cowork_list; cmd_cowork_list(); return
     if args.agent_list_sessions:
-        from claude_agents_sdk import cmd_agent_list_sessions; cmd_agent_list_sessions(); return
+        from agents.claude_agents_sdk import cmd_agent_list_sessions; cmd_agent_list_sessions(); return
     if args.list_tool_presets:
-        from claude_agents_sdk import cmd_list_tool_presets; cmd_list_tool_presets(); return
+        from agents.claude_agents_sdk import cmd_list_tool_presets; cmd_list_tool_presets(); return
     if args.code_agent_list_sessions:
         from claude_code import cmd_code_list_sessions; cmd_code_list_sessions(); return
     if args.code_agent_list_tools:
@@ -701,16 +701,16 @@ def main():
     model = _model(args)
 
     if args.list_models:
-        from claude_models import cmd_list_models
+        from api.claude_models import cmd_list_models
         cmd_list_models(key, include_legacy=getattr(args, "list_models_legacy", False)); return
     if args.model_info:
-        from claude_models import cmd_model_info; cmd_model_info(args.model_info, key); return
+        from api.claude_models import cmd_model_info; cmd_model_info(args.model_info, key); return
     if args.fable5:
-        from claude_fable5 import cmd_fable5_call
+        from agents.claude_fable5 import cmd_fable5_call
         cmd_fable5_call(args.fable5, key, fallback_model=args.fallback_model,
                         allow_fallback=not args.fable5_no_fallback); return
     if args.mythos5:
-        from claude_mythos5 import cmd_mythos5_call
+        from agents.claude_mythos5 import cmd_mythos5_call
         cmd_mythos5_call(args.mythos5, key); return
 
     # ── zai-live ──
@@ -786,7 +786,7 @@ def main():
                      adaptive=args.adaptive, show_thinking=args.show_thinking,
                      stream=args.stream); return
     if args.stream:
-        from claude_stream import cmd_stream
+        from api.claude_stream import cmd_stream
         cmd_stream(args.prompt or "", key, model,
                    file_content=_read_file(args.file) if args.file else None,
                    show_thinking=args.show_thinking); return
@@ -845,11 +845,11 @@ def main():
                            system=args.cache_system or None, docs=docs,
                            ttl=args.cache_ttl, show_stats=args.cache_stats); return
     if args.tool_agent:
-        from claude_tools import cmd_tool_agent
+        from core.claude_tools import cmd_tool_agent
         cmd_tool_agent(args.prompt or "", key, model,
                        max_turns=args.max_turns); return
     if args.server_tool:
-        from claude_tools import cmd_server_tool
+        from core.claude_tools import cmd_server_tool
         extra_tool_defs = None
         if args.file:
             import json as _json
@@ -864,7 +864,7 @@ def main():
                         use_ptc=args.ptc,
                         extra_tool_defs=extra_tool_defs); return
     if args.memory_agent:
-        from claude_tools import cmd_memory_agent
+        from core.claude_tools import cmd_memory_agent
         cmd_memory_agent(args.memory_agent, key, model,
                          memory_dir=args.memory_dir, max_turns=args.max_turns); return
     if args.advisor:
@@ -885,7 +885,7 @@ def main():
         cmd_embed_similarity(args.embed_similarity[0], args.embed_similarity[1],
                              model=args.embed_model); return
     if args.stream_tools:
-        from claude_stream import cmd_stream_tools
+        from api.claude_stream import cmd_stream_tools
         import json as _json
         tool_defs = _json.loads(_read_file(args.file)) if args.file else []
         if isinstance(tool_defs, dict):
@@ -934,13 +934,13 @@ def main():
         from claude_citations import cmd_rag
         cmd_rag(args.prompt or "", args.rag, key, model, pattern=args.rag_pattern); return
     if args.computer_use:
-        from claude_models import cmd_computer_use
+        from api.claude_models import cmd_computer_use
         cmd_computer_use(args.computer_use, key, model); return
     if args.interleaved_thinking:
-        from claude_models import cmd_adaptive_thinking
+        from api.claude_models import cmd_adaptive_thinking
         cmd_adaptive_thinking(args.prompt or "", key, model, effort=args.effort or "medium"); return
     if args.agent_session or args.agent_orchestrate:
-        from claude_agents_sdk import cmd_agent_chat, cmd_agent_orchestrate
+        from agents.claude_agents_sdk import cmd_agent_chat, cmd_agent_orchestrate
         if args.agent_orchestrate:
             cmd_agent_orchestrate(args.prompt or "", key, model,
                                   session_id=args.agent_session)
@@ -953,7 +953,7 @@ def main():
         # /v1/sessions) — distinct from --agent-session above, which runs a
         # local agent loop over the plain Messages API. See
         # claude_agents_sdk.ManagedAgentsClient.
-        from claude_agents_sdk import cmd_managed_agent_run
+        from agents.claude_agents_sdk import cmd_managed_agent_run
         cmd_managed_agent_run(args.agent_managed_run, key, model=model); return
     if args.cowork:
         from cowork import cmd_cowork
@@ -966,7 +966,7 @@ def main():
 
     # Claude Code commands
     if args.code_agent_mcp_tunnel:
-        from claude_agents_sdk import cmd_mcp_tunnel_open
+        from agents.claude_agents_sdk import cmd_mcp_tunnel_open
         cmd_mcp_tunnel_open(key, args.code_agent_mcp_tunnel); return
     if args.code_agent or args.code_agent_session or args.code_agent_resume:
         from claude_code import cmd_code_agent

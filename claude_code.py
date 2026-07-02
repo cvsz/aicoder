@@ -298,7 +298,7 @@ class HooksEngine:
     def with_plugins(cls, base: "HooksEngine") -> "HooksEngine":
         """Merge plugin-bundled hooks.json files into an existing engine's config."""
         try:
-            from claude_plugins import load_plugin_hooks
+            from core.claude_plugins import load_plugin_hooks
             plugin_hooks = load_plugin_hooks()
         except ImportError:
             return base
