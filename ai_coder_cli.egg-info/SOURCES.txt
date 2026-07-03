@@ -1,0 +1,10 @@
+LICENSE
+README.md
+main.py
+setup.py
+ai_coder_cli.egg-info/PKG-INFO
+ai_coder_cli.egg-info/SOURCES.txt
+ai_coder_cli.egg-info/dependency_links.txt
+ai_coder_cli.egg-info/entry_points.txt
+ai_coder_cli.egg-info/requires.txt
+ai_coder_cli.egg-info/top_level.txt
