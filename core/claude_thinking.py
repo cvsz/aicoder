@@ -37,7 +37,7 @@ EFFORT_BUDGETS = {
 class ThinkingCoder:
     """Claude client with extended / adaptive thinking support."""
 
-    def __init__(self, api_key: str, model: str = "claude-sonnet-4-6",
+    def __init__(self, api_key: str, model: str = "claude-sonnet-5",
                  max_tokens: int = 8000):
         self.client = anthropic.Anthropic(api_key=api_key)
         self.model   = model

@@ -33,7 +33,7 @@ WEB_FETCH_TOOL = {
 class SearchCoder:
     """Claude with web search and fetch tools."""
 
-    def __init__(self, api_key: str, model: str = "claude-sonnet-4-6",
+    def __init__(self, api_key: str, model: str = "claude-sonnet-5",
                  max_tokens: int = 4096):
         self.client     = anthropic.Anthropic(api_key=api_key)
         self.model      = model
