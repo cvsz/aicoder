@@ -1,51 +1,42 @@
-# =====================
 # Python
-# =====================
 __pycache__/
 *.py[cod]
 *$py.class
-*.so
-*.egg
 *.egg-info/
-dist/
-*.whl
+.eggs/
 
-# =====================
 # Virtual environments
-# =====================
-build-venv/
-venv/
 .venv/
+venv/
 env/
 
-# =====================
-# Build artifacts
-# =====================
+# Env / secrets — never commit real credentials
+.env
+.env.*
+!.env.example
+
+# Test / coverage / lint / type-check caches
+.pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# PyInstaller build artifacts
 build/
-*.spec
+dist/
+*.spec.bak
 
-# =====================
-# BCC source tree (installed via system package, not pip)
-# =====================
-bcc/
+# Local app state (mirrors what the CLI writes under the user's home;
+# harmless if it ever ends up in-repo during local testing)
+.ai-coder/
+.ai-coder-config.json
 
-# =====================
-# IDE / Editors
-# =====================
+# Editors / OS
 .vscode/
 .idea/
 *.swp
 *.swo
 *~
-
-# =====================
-# OS files
-# =====================
 .DS_Store
-Thumbs.db
-
-# =====================
-# Environment / Secrets
-# =====================
-.env
-.env.local
