@@ -27,12 +27,15 @@ import urllib.error
 from pathlib import Path
 from typing import Optional
 
+from exceptions import AICoderError
+from resilience import CircuitBreaker, retry, urlopen_json
 
-ENDPOINT    = "http://192.168.74.128:20128/v1/messages"
-BETA_HEADER = "code-execution-2025-05-22"
+ENDPOINT    = "https://api.anthropic.com/v1/messages"
+BETA_HEADER = "code-execution-2026-01-20"
+_breaker = CircuitBreaker(failure_threshold=5, reset_timeout=30)
 
 CODE_EXEC_TOOL = {
-    "type": "code_execution_20250522",
+    "type": "code_execution_20260120",
     "name": "code_execution",
 }
 
@@ -46,7 +49,8 @@ class CodeExecutionCoder:
         self.model      = model
         self.max_tokens = max_tokens
 
-    def _post(self, payload: dict) -> dict:
+    @retry(max_attempts=4, base_delay=1.0, max_delay=15.0, breaker=_breaker)
+    def _call(self, payload: dict) -> dict:
         headers = {
             "Content-Type":      "application/json",
             "x-api-key":         self.api_key,
@@ -59,11 +63,13 @@ class CodeExecutionCoder:
             headers=headers,
             method="POST",
         )
+        return urlopen_json(req, timeout=300)
+
+    def _post(self, payload: dict) -> dict:
         try:
-            with urllib.request.urlopen(req, timeout=300) as r:
-                return json.loads(r.read().decode())
-        except urllib.error.HTTPError as e:
-            return {"error": e.read().decode(), "status": e.code}
+            return self._call(payload)
+        except AICoderError as e:
+            return {"error": e.message, "status": getattr(e, "status_code", None)}
         except Exception as e:
             return {"error": str(e)}
 

@@ -1,6 +1,6 @@
 """
 claude_embeddings.py — Text embeddings
-AI Model Coder CLI v1.11.0
+AI Model Coder CLI v1.23.0
 
 This was a complete gap before this pass: no module at all, even though
 claude_memory.py's docstring says "swap in embeddings for larger stores"
@@ -28,10 +28,20 @@ CLI flags:
                              and first few values
   --embed-file FILE         Embed each line of FILE, print one vector per line
   --embed-similarity A B    Cosine similarity between two strings' embeddings
-  --embed-model MODEL       Voyage model (default: voyage-3.5)
+  --embed-model MODEL       Voyage model (default: voyage-4)
   --embed-input-type TYPE   "query" or "document" (default: document) —
                              Voyage recommends setting this for retrieval,
                              it measurably improves ranking quality
+
+Available Voyage models (checked 2026-07-09):
+  voyage-4           Balanced quality and efficiency (recommended default)
+  voyage-4-large     Best general-purpose and multilingual retrieval
+  voyage-4-lite      Optimized for latency and cost
+  voyage-4-nano      Open-weight (Apache 2.0), available on HuggingFace
+  voyage-3.5         Previous generation balanced model
+  voyage-code-3      Optimized for code retrieval
+  voyage-context-4   Contextualized chunk embeddings (120k context, RAG)
+  voyage-multimodal-3.5  Text + image + video embeddings
 """
 
 import json
@@ -41,13 +51,23 @@ import urllib.request
 import urllib.error
 from typing import List, Optional
 
+from exceptions import AICoderError
+from resilience import CircuitBreaker, retry, urlopen_json
 
 VOYAGE_ENDPOINT = "https://api.voyageai.com/v1/embeddings"
+# Separate breaker from the Anthropic-API modules: Voyage is a distinct
+# downstream dependency and an outage there shouldn't look like an
+# Anthropic API outage (or vice versa).
+_breaker = CircuitBreaker(failure_threshold=5, reset_timeout=30)
 
-# voyage-3.5 is Voyage's current balanced general-purpose model per their
-# docs as of this check; voyage-code-3 is the recommended pick specifically
-# for code-retrieval workloads (this being a coder CLI, worth calling out).
-DEFAULT_MODEL = "voyage-3.5"
+# voyage-4 is Voyage's current balanced general-purpose model (Voyage 4
+# series released 2026-01-15, per voyage.ai/docs checked 2026-07-09).
+# voyage-3.5 was the previous default; still works but superseded.
+# voyage-code-3 is the recommended pick specifically for code-retrieval
+# workloads (this being a coder CLI, worth calling out).
+# voyage-context-4 (2026-06-29) offers contextualized chunk embeddings
+# with 120k context — useful for RAG pipelines (claude_rag.py).
+DEFAULT_MODEL = "voyage-4"
 CODE_MODEL    = "voyage-code-3"
 
 
@@ -84,11 +104,15 @@ def embed(texts: List[str], model: str = DEFAULT_MODEL,
         headers=headers, method="POST",
     )
     try:
-        with urllib.request.urlopen(req, timeout=60) as r:
-            data = json.loads(r.read().decode())
-    except urllib.error.HTTPError as e:
-        raise RuntimeError(f"Voyage API error [{e.code}]: {e.read().decode()}")
+        data = _call(req)
+    except AICoderError as e:
+        raise RuntimeError(f"Voyage API error: {e.message}") from e
     return [item["embedding"] for item in data.get("data", [])]
+
+
+@retry(max_attempts=4, base_delay=1.0, max_delay=15.0, breaker=_breaker)
+def _call(req: "urllib.request.Request") -> dict:
+    return urlopen_json(req, timeout=60)
 
 
 def cosine_similarity(a: List[float], b: List[float]) -> float:

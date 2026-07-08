@@ -22,7 +22,7 @@ from dataclasses import dataclass, field, asdict
 from typing import Optional, Any
 import re
 import anthropic
-from core.utils import sampling_kwargs
+from utils import sampling_kwargs
 
 
 @dataclass

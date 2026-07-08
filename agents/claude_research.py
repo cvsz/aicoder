@@ -5,14 +5,18 @@ then synthesize into a cited Markdown report.
 AI Model Coder CLI v1.10.0
 """
 
-from core.utils import sampling_kwargs
+from utils import sampling_kwargs
 
 import json
 import urllib.request
+import urllib.error
 from typing import List, Optional
 from dataclasses import dataclass, field
 from datetime import datetime
 import anthropic
+
+from exceptions import AICoderError
+from resilience import raise_for_http_error, retry
 
 SYS_PLAN  = "You are a research planning assistant. Output only valid JSON."
 SYS_ANAL  = "You are a careful research analyst. Be precise. Flag uncertainty."
@@ -60,11 +64,22 @@ class DeepResearchAgent:
 
     def _fetch(self, url: str) -> str:
         try:
-            req = urllib.request.Request(url, headers={"User-Agent": "ai-coder-research/1.0"})
-            with urllib.request.urlopen(req, timeout=15) as resp:
-                return resp.read().decode("utf-8", errors="replace")[:4000]
+            return self._fetch_retrying(url)
         except Exception as e:
             return f"[fetch failed: {e}]"
+
+    # No CircuitBreaker here deliberately: each call targets a different,
+    # unrelated third-party URL supplied by the caller, not one fixed
+    # downstream dependency — a shared breaker would trip on unrelated dead
+    # links and start short-circuiting fetches to sites that are fine.
+    @retry(max_attempts=2, base_delay=1.0, max_delay=5.0)
+    def _fetch_retrying(self, url: str) -> str:
+        req = urllib.request.Request(url, headers={"User-Agent": "ai-coder-research/1.0"})
+        try:
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                return resp.read().decode("utf-8", errors="replace")[:4000]
+        except (urllib.error.HTTPError, TimeoutError, ConnectionError, OSError) as e:
+            raise_for_http_error(e)
 
     def plan(self, topic: str, depth: int = 4) -> List[SubQ]:
         raw = self._call(SYS_PLAN,

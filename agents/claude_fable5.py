@@ -29,17 +29,36 @@ What this module adds, concretely:
     (returned as a normal 200 response, not an HTTP error) rather than a
     silent failure. Claude Mythos 5 does not include these classifiers
     (limited-availability access only — most callers will not have it).
-  • Optional client-side fallback: on a refusal, this module can retry the
-    same prompt against a fallback model (default: claude-opus-4-8, since
-    that's the most capable model this CLI's own static fallback list
-    already lists — adjust via --fallback-model once you know your
-    account's actual best available model).
+  • Two fallback patterns, and when to use each:
+      - Server-side (`fallbacks` param, preferred): pass
+        --fable5-fallback-chain MODEL1,MODEL2 (up to 3 models total,
+        including the primary). The platform itself retries the *same*
+        request against the next model in the list if the primary
+        refuses, in the same round trip — one HTTP call, not two, and it
+        composes correctly with the fallback-credit beta header without
+        the caller having to think about it. Use this when you just want
+        the platform to handle it.
+      - Client-side manual retry (legacy, still supported): on a refusal,
+        this module retries the same prompt itself against a separate
+        fallback model (default: claude-opus-4-8) with a second HTTP
+        call. Use this when you want to change the prompt/system before
+        retrying, or don't want the fallbacks beta. This path only runs
+        when --fable5-fallback-chain is *not* given.
 
 CLI flags:
-  --fable5-info                Show what's known about Fable 5 / Mythos 5
-  --fable5 PROMPT               Call Claude Fable 5 with refusal/fallback handling
-  --fable5-no-fallback           Disable automatic fallback on refusal (just report it)
-  --fallback-model ID            Override the fallback model (default: claude-opus-4-8)
+  --fable5-info                   Show what's known about Fable 5 / Mythos 5
+  --fable5 PROMPT                  Call Claude Fable 5 with refusal/fallback handling
+  --fable5-fallback-chain M1,M2      Server-side fallback: up to 3 models total
+                                    (including the primary), tried in order by the
+                                    platform itself on a refusal. Takes priority over
+                                    the manual retry path below when set.
+  --fable5-no-fallback              Disable automatic fallback on refusal (just report it).
+                                    Only affects the manual retry path (no effect when
+                                    --fable5-fallback-chain is set — that's already
+                                    server-side and applies before this flag is checked).
+  --fallback-model ID               Override the manual-retry fallback model
+                                    (default: claude-opus-4-8). No effect when
+                                    --fable5-fallback-chain is set.
 """
 
 import json
@@ -47,10 +66,31 @@ import urllib.request
 import urllib.error
 from typing import Optional
 
-MESSAGES_ENDPOINT = "http://192.168.74.128:20128/v1/messages"
+from exceptions import AICoderError
+from resilience import CircuitBreaker, retry, urlopen_json
+
+MESSAGES_ENDPOINT = "https://api.anthropic.com/v1/messages"
+_breaker = CircuitBreaker(failure_threshold=5, reset_timeout=30)
 
 FABLE5_MODEL_ID = "claude-fable-5"
 MYTHOS5_MODEL_ID = "claude-mythos-5"
+
+# Verified against platform.claude.com/docs/en/build-with-claude/refusals-and-fallback
+# (checked 2026-07-04). We build the retry ourselves with raw urllib rather than an
+# SDK, so this is the "manual" fallback path the docs describe — sending this beta
+# header on the retry earns fallback credit (refunds the prompt-cache cost of
+# switching models) instead of paying that cost twice.
+FALLBACK_CREDIT_BETA_HEADER = "fallback-credit-2026-06-01"
+
+# The stop_details.category values Anthropic actually documents for a Fable 5
+# refusal. `category` (and `explanation`) can legitimately be null even when
+# stop_reason == "refusal" — that's a documented, permanent state, not a bug.
+REFUSAL_CATEGORIES = {
+    "cyber": "Could enable cyber harm (e.g. malware/exploit development); benign security work can also trigger it.",
+    "bio": "Could enable biological harm; benign life-sciences work can also trigger it.",
+    "frontier_llm": "Could assist a competing AI model's development (restricted under Anthropic's commercial terms).",
+    "reasoning_extraction": "Asks the model to reproduce its internal reasoning as response text; use adaptive thinking instead.",
+}
 
 # Mirrors claude_models.py's "known models" fallback pattern — a local
 # cache for when the live Models API isn't consulted, not a source of truth.
@@ -91,10 +131,9 @@ FABLE_MYTHOS_INFO = {
 
 class RefusalError(Exception):
     """Raised when a Fable 5 call is refused and fallback is disabled/exhausted."""
-    def __init__(self, message: str, category: Optional[str] = None, explanation: Optional[str] = None):
+    def __init__(self, message: str, classifier: Optional[str] = None):
         super().__init__(message)
-        self.category = category
-        self.explanation = explanation
+        self.classifier = classifier
 
 
 class Fable5Client:
@@ -103,27 +142,39 @@ class Fable5Client:
     claude_*.py modules for consistency."""
 
     def __init__(self, api_key: str, model: str = FABLE5_MODEL_ID,
-                 fallback_model: str = "claude-opus-4-8", max_tokens: int = 4096):
+                 fallback_model: str = "claude-opus-4-8", max_tokens: int = 4096,
+                 fallback_chain: Optional[list] = None):
         self.api_key = api_key
         self.model = model
         self.fallback_model = fallback_model
         self.max_tokens = max_tokens
+        # Server-side fallback (`fallbacks` param, beta, checked against
+        # platform.claude.com/docs 2026-07-04). Up to 3 models total,
+        # including the primary `self.model` — do not repeat the primary
+        # in this list. When set, this replaces (not supplements) the
+        # manual client-side retry path in call_with_fallback().
+        self.fallback_chain = fallback_chain
 
-    def _post(self, payload: dict) -> dict:
+    @retry(max_attempts=4, base_delay=1.0, max_delay=15.0, breaker=_breaker)
+    def _call(self, payload: dict, extra_headers: Optional[dict] = None) -> dict:
         headers = {
             "Content-Type": "application/json",
             "x-api-key": self.api_key,
             "anthropic-version": "2023-06-01",
         }
+        if extra_headers:
+            headers.update(extra_headers)
         req = urllib.request.Request(
             MESSAGES_ENDPOINT, data=json.dumps(payload).encode(),
             headers=headers, method="POST",
         )
+        return urlopen_json(req, timeout=300)
+
+    def _post(self, payload: dict, extra_headers: Optional[dict] = None) -> dict:
         try:
-            with urllib.request.urlopen(req, timeout=300) as r:
-                return json.loads(r.read().decode())
-        except urllib.error.HTTPError as e:
-            return {"error": e.read().decode(), "status": e.code}
+            return self._call(payload, extra_headers)
+        except AICoderError as e:
+            return {"error": e.message, "status": getattr(e, "status_code", None)}
         except Exception as e:
             return {"error": str(e)}
 
@@ -133,8 +184,13 @@ class Fable5Client:
         )
 
     def call(self, prompt: str, system: Optional[str] = None,
-             model: Optional[str] = None) -> dict:
-        """One raw call. Returns the parsed response dict (caller inspects stop_reason)."""
+             model: Optional[str] = None, is_fallback_retry: bool = False) -> dict:
+        """One raw call. Returns the parsed response dict (caller inspects stop_reason).
+
+        is_fallback_retry=True sends the fallback-credit beta header, per the
+        "manual retry" pattern in Anthropic's docs — this is what gets the
+        prompt-cache cost of the switch refunded instead of charged twice.
+        """
         payload = {
             "model": model or self.model,
             "max_tokens": self.max_tokens,
@@ -142,53 +198,99 @@ class Fable5Client:
         }
         if system:
             payload["system"] = system
-        return self._post(payload)
+        # Server-side fallback: only attached on the primary call (never on
+        # a manual is_fallback_retry call, and never if a caller passed an
+        # explicit `model=` override, since fallbacks only make sense
+        # attached to the request naming the primary model).
+        if self.fallback_chain and not is_fallback_retry and model is None:
+            payload["fallbacks"] = self.fallback_chain
+        extra_headers = {"anthropic-beta": FALLBACK_CREDIT_BETA_HEADER} if is_fallback_retry else None
+        return self._post(payload, extra_headers=extra_headers)
 
     def call_with_fallback(self, prompt: str, system: Optional[str] = None,
                            allow_fallback: bool = True) -> dict:
         """
-        Call the configured model; if the response is refused
-        (stop_reason == 'refusal'), optionally retry against
-        self.fallback_model, mirroring Anthropic's documented client-side
-        retry pattern. Returns a dict:
-          {text, stop_reason, refused: bool, fell_back: bool, category: str|None, explanation: str|None, raw}
+        Call the configured model.
+
+        If self.fallback_chain is set, this is a thin compatibility
+        wrapper around the server-side `fallbacks` param: call() already
+        attached the chain to the request, so the platform itself retries
+        against the next model in the list on a refusal, in the same round
+        trip. This method just has to inspect the response to report which
+        model actually answered — no second HTTP call from here.
+
+        If self.fallback_chain is unset, falls through to the legacy
+        manual retry path: on stop_reason == 'refusal', optionally retry
+        against self.fallback_model as a second, separate request (sending
+        the fallback-credit beta header so the switch isn't billed twice).
+
+        Returns a dict:
+          {text, stop_reason, refused: bool, fell_back: bool,
+           served_by: str|None, classifier: str|None, category: str|None,
+           explanation: str, raw}
         """
         data = self.call(prompt, system=system)
         if "error" in data:
             return {"text": f"[ERROR] {data['error']}", "stop_reason": None,
-                   "refused": False, "fell_back": False, "category": None,
-                   "explanation": None, "raw": data}
+                   "refused": False, "fell_back": False, "served_by": None,
+                   "classifier": None, "category": None, "explanation": "", "raw": data}
 
         stop_reason = data.get("stop_reason")
         refused = stop_reason == "refusal"
-        
-        # Extract stop_details
+
+        if self.fallback_chain:
+            # Server-side path: the platform already retried internally if
+            # it needed to. The docs specify the response echoes back which
+            # model in the chain actually served the request (falls back to
+            # self.model if the field isn't present, e.g. no refusal
+            # occurred so the primary model answered).
+            served_by = data.get("model", self.model)
+            stop_details = (data.get("stop_details") or {}) if refused else {}
+            category = stop_details.get("category")
+            return {"text": self._extract_text(data), "stop_reason": stop_reason,
+                   "refused": refused, "fell_back": served_by != self.model,
+                   "served_by": served_by, "classifier": category,
+                   "category": category, "explanation": stop_details.get("explanation", ""),
+                   "raw": data}
+        # Was reading data["refusal"]["classifier"] — a field this project
+        # invented rather than one the API documents. The documented shape
+        # (per Refusals and fallback, checked 2026-07-04) is
+        # stop_details: {type, category, explanation}, with category one of
+        # "cyber", "bio", "frontier_llm", "reasoning_extraction", or null
+        # (null is a documented permanent value, not a missing field).
+        # classifier is kept as an alias of category below so any existing
+        # caller reading result["classifier"] keeps working.
         stop_details = (data.get("stop_details") or {}) if refused else {}
         category = stop_details.get("category")
-        explanation = stop_details.get("explanation")
+        classifier = category
 
         if refused and allow_fallback:
-            fallback_data = self.call(prompt, system=system, model=self.fallback_model)
+            # is_fallback_retry=True sends the fallback-credit beta header so
+            # this manual retry doesn't get billed twice for prompt caching.
+            fallback_data = self.call(prompt, system=system, model=self.fallback_model,
+                                      is_fallback_retry=True)
             if "error" in fallback_data:
                 return {"text": f"[ERROR on fallback] {fallback_data['error']}",
                        "stop_reason": stop_reason, "refused": True, "fell_back": False,
-                       "category": category, "explanation": explanation, "raw": data}
+                       "served_by": None, "classifier": classifier, "category": category,
+                       "explanation": stop_details.get("explanation", ""), "raw": data}
             return {"text": self._extract_text(fallback_data),
                    "stop_reason": fallback_data.get("stop_reason"),
-                   "refused": True, "fell_back": True, "category": category,
-                   "explanation": explanation, "raw": fallback_data}
+                   "refused": True, "fell_back": True, "served_by": self.fallback_model,
+                   "classifier": classifier, "category": category,
+                   "explanation": stop_details.get("explanation", ""),
+                   "raw": fallback_data}
 
         if refused:
             raise RefusalError(
-                f"Claude Fable 5 declined this request (category: {category or 'unspecified'}, explanation: {explanation or 'none'}). "
+                f"Claude Fable 5 declined this request (category: {category or 'unspecified'}). "
                 "Re-run with fallback enabled, or use claude-opus-4-8 directly.",
-                category=category,
-                explanation=explanation
+                classifier=classifier
             )
 
         return {"text": self._extract_text(data), "stop_reason": stop_reason,
-               "refused": False, "fell_back": False, "category": None,
-               "explanation": None, "raw": data}
+               "refused": False, "fell_back": False, "served_by": self.model,
+               "classifier": None, "category": None, "explanation": "", "raw": data}
 
 
 def estimate_cost_usd(model_id: str, input_tokens: int, output_tokens: int) -> Optional[float]:
@@ -219,8 +321,10 @@ def cmd_fable5_info():
 
 
 def cmd_fable5_call(prompt: str, api_key: str, fallback_model: str = "claude-opus-4-8",
-                    allow_fallback: bool = True, system: Optional[str] = None):
-    client = Fable5Client(api_key=api_key, fallback_model=fallback_model)
+                    allow_fallback: bool = True, system: Optional[str] = None,
+                    fallback_chain: Optional[list] = None):
+    client = Fable5Client(api_key=api_key, fallback_model=fallback_model,
+                          fallback_chain=fallback_chain)
     try:
         result = client.call_with_fallback(prompt, system=system, allow_fallback=allow_fallback)
     except RefusalError as e:
@@ -228,8 +332,26 @@ def cmd_fable5_call(prompt: str, api_key: str, fallback_model: str = "claude-opu
         return None
 
     if result["fell_back"]:
-        print(f"\033[93mℹ Fable 5 declined this request (category: {result['category'] or 'unspecified'}, "
-             f"explanation: {result['explanation'] or 'none'}); "
-             f"showing the {fallback_model} response instead.\033[0m\n")
+        served_by = result.get("served_by") or fallback_model
+        mode = "server-side fallbacks" if fallback_chain else "client-side manual retry"
+        print(f"\033[93mℹ Fable 5 declined this request (classifier: {result['classifier'] or 'unspecified'}); "
+             f"showing the {served_by} response instead ({mode}).\033[0m\n")
     print(result["text"])
     return result
+
+
+def parse_fallback_chain(raw: Optional[str]) -> Optional[list]:
+    """Parse the --fable5-fallback-chain CLI value ('MODEL1,MODEL2') into a
+    list, enforcing the documented max of 3 models total (including the
+    primary, which the caller adds separately — so this list itself must be
+    at most 2 entries for the common case of one primary + this chain, or
+    up to 3 if the primary model is not repeated here)."""
+    if not raw:
+        return None
+    chain = [m.strip() for m in raw.split(",") if m.strip()]
+    if len(chain) > 3:
+        raise ValueError(
+            f"--fable5-fallback-chain accepts at most 3 models total (including the "
+            f"primary); got {len(chain)}."
+        )
+    return chain

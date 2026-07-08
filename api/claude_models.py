@@ -1,6 +1,6 @@
 """
 claude_models.py — Models API + Computer Use + Adaptive/Interleaved Thinking
-AI Model Coder CLI v1.10.4
+AI Model Coder CLI v1.23.0
 
 Covers:
   • Models API  — list available models, get model info
@@ -23,7 +23,7 @@ CLI flags:
   --adaptive-thinking      Enable adaptive thinking (model decides depth)
   --interleaved-thinking   Enable thinking between tool calls
   --fast-mode              Enable fast/reduced-latency mode
-  --effort LEVEL           Set effort: low|medium|high|max
+  --effort LEVEL           Set effort: low|medium|high|xhigh|max
 """
 
 import json
@@ -32,9 +32,12 @@ import urllib.request
 import urllib.error
 from typing import Optional
 
+from exceptions import AICoderError
+from resilience import CircuitBreaker, retry, urlopen_json
 
-MODELS_ENDPOINT   = "http://192.168.74.128:20128/v1/models"
-MESSAGES_ENDPOINT = "http://192.168.74.128:20128/v1/messages"
+MODELS_ENDPOINT   = "https://api.anthropic.com/v1/models"
+MESSAGES_ENDPOINT = "https://api.anthropic.com/v1/messages"
+_breaker = CircuitBreaker(failure_threshold=5, reset_timeout=30)
 
 
 # ── Local model catalog ─────────────────────────────────────────────────────
@@ -54,6 +57,15 @@ MODEL_CATALOG: dict = {
         "thinking": "adaptive", "effort_default": None,
         "notes": "Same underlying model as Fable 5, no safety classifiers. "
                  "Project Glasswing invitation-only access.",
+    },
+    "claude-mythos-preview": {
+        "display_name": "Claude Mythos Preview", "tier": "mythos",
+        "context_window": 1_000_000, "max_output": 128_000,
+        "price_in": 10.0, "price_out": 50.0,
+        "thinking": "adaptive", "effort_default": None,
+        "notes": "Research preview for defensive cybersecurity workflows. "
+                 "Project Glasswing invitation-only access. Adaptive thinking "
+                 "always on (same as Mythos 5). Does not support service_tier.",
     },
     "claude-fable-5": {
         "display_name": "Claude Fable 5", "tier": "mythos",
@@ -207,6 +219,15 @@ RETIRED_MODELS: dict = {
         "notes": "Retired well before this catalog's other entries; flagged in case "
                  "of very old pinned config.",
     },
+    "claude-opus-4-1-20250514": {
+        "display_name": "Claude Opus 4.1",
+        "retired": "2026-08-05",
+        "replacement": "claude-opus-4-8",
+        "upcoming": True,
+        "notes": "Scheduled for retirement 2026-08-05 per "
+                 "platform.claude.com/docs/en/about-claude/model-deprecations "
+                 "(checked 2026-07-09). Still callable until that date.",
+    },
 }
 
 
@@ -223,6 +244,10 @@ class ModelsAPI:
     def __init__(self, api_key: str):
         self.api_key = api_key
 
+    @retry(max_attempts=4, base_delay=1.0, max_delay=15.0, breaker=_breaker)
+    def _call(self, req: "urllib.request.Request") -> dict:
+        return urlopen_json(req, timeout=30)
+
     def _get(self, url: str) -> dict:
         headers = {
             "x-api-key":         self.api_key,
@@ -230,10 +255,9 @@ class ModelsAPI:
         }
         req = urllib.request.Request(url, headers=headers, method="GET")
         try:
-            with urllib.request.urlopen(req, timeout=30) as r:
-                return json.loads(r.read().decode())
-        except urllib.error.HTTPError as e:
-            raise RuntimeError(f"Models API error [{e.code}]: {e.read().decode()}")
+            return self._call(req)
+        except AICoderError as e:
+            raise RuntimeError(f"Models API error: {e.message}") from e
 
     def list_models(self) -> list:
         data = self._get(MODELS_ENDPOINT)
@@ -284,13 +308,22 @@ def cmd_list_models(api_key: str, include_legacy: bool = False):
 def cmd_model_info(model_id: str, api_key: str):
     retired = check_retired(model_id)
     if retired:
-        print(f"\n  \033[91m✗ {model_id} was retired on {retired['retired']}\033[0m")
-        print(f"    Was:         {retired['display_name']}")
-        print(f"    Migrate to:  {retired['replacement']}")
-        print(f"    Notes:       {retired['notes']}")
-        print(f"\n  API calls to this ID will fail — this isn't a live lookup, "
-              f"just the local retirement record. Continuing to check the live "
-              f"API and local catalog below in case the record above is stale:\n")
+        if retired.get("upcoming"):
+            print(f"\n  \033[93m⚠ {model_id} is scheduled for retirement on "
+                  f"{retired['retired']}\033[0m")
+            print(f"    Currently:   {retired['display_name']} (still callable)")
+            print(f"    Migrate to:  {retired['replacement']}")
+            print(f"    Notes:       {retired['notes']}")
+            print(f"\n  API calls to this ID still work — retirement is not yet "
+                  f"effective. Continuing with live lookup below:\n")
+        else:
+            print(f"\n  \033[91m✗ {model_id} was retired on {retired['retired']}\033[0m")
+            print(f"    Was:         {retired['display_name']}")
+            print(f"    Migrate to:  {retired['replacement']}")
+            print(f"    Notes:       {retired['notes']}")
+            print(f"\n  API calls to this ID will fail — this isn't a live lookup, "
+                  f"just the local retirement record. Continuing to check the live "
+                  f"API and local catalog below in case the record above is stale:\n")
 
     ma = ModelsAPI(api_key=api_key)
     try:
@@ -375,15 +408,33 @@ def cmd_check_deprecated(path: str):
         print(f"\n\033[92m✓ No retired model IDs found under {path}\033[0m")
         return
 
-    print(f"\n\033[91m⚠ Retired model IDs found under {path}\033[0m\n")
-    for model_id, locations in hits.items():
-        rec = RETIRED_MODELS[model_id]
-        print(f"  \033[1m{model_id}\033[0m — retired {rec['retired']}, "
-              f"migrate to \033[92m{rec['replacement']}\033[0m")
-        for fp, lineno in locations[:5]:
-            print(f"    {fp}:{lineno}")
-        if len(locations) > 5:
-            print(f"    ... and {len(locations) - 5} more")
+    # Split into already-retired vs upcoming retirement
+    retired_hits = {k: v for k, v in hits.items()
+                    if not RETIRED_MODELS[k].get("upcoming")}
+    upcoming_hits = {k: v for k, v in hits.items()
+                     if RETIRED_MODELS[k].get("upcoming")}
+
+    if retired_hits:
+        print(f"\n\033[91m⚠ Retired model IDs found under {path}\033[0m\n")
+        for model_id, locations in retired_hits.items():
+            rec = RETIRED_MODELS[model_id]
+            print(f"  \033[1m{model_id}\033[0m — retired {rec['retired']}, "
+                  f"migrate to \033[92m{rec['replacement']}\033[0m")
+            for fp, lineno in locations[:5]:
+                print(f"    {fp}:{lineno}")
+            if len(locations) > 5:
+                print(f"    ... and {len(locations) - 5} more")
+
+    if upcoming_hits:
+        print(f"\n\033[93m⚠ Upcoming retirement(s) found under {path}\033[0m\n")
+        for model_id, locations in upcoming_hits.items():
+            rec = RETIRED_MODELS[model_id]
+            print(f"  \033[1m{model_id}\033[0m — scheduled for retirement "
+                  f"{rec['retired']}, migrate to \033[92m{rec['replacement']}\033[0m")
+            for fp, lineno in locations[:5]:
+                print(f"    {fp}:{lineno}")
+            if len(locations) > 5:
+                print(f"    ... and {len(locations) - 5} more")
         print()
 
 
@@ -402,9 +453,6 @@ def cmd_check_deprecated(path: str):
 UPGRADE_TARGETS = {
     "fable5": "claude-fable-5",
     "opus":   "claude-opus-4-8",
-    "sonnet5": "claude-sonnet-5",
-    "haiku45": "claude-haiku-4-5-20251001",
-    "mythos5": "claude-mythos-5",
 }
 
 # Known alternate spellings that aren't literal MODEL_CATALOG/RETIRED_MODELS
@@ -544,7 +592,8 @@ class ComputerUseCoder:
         self.width      = width
         self.height     = height
 
-    def _post(self, payload: dict) -> dict:
+    @retry(max_attempts=4, base_delay=1.0, max_delay=15.0, breaker=_breaker)
+    def _call(self, payload: dict) -> dict:
         headers = {
             "Content-Type":      "application/json",
             "x-api-key":         self.api_key,
@@ -557,11 +606,13 @@ class ComputerUseCoder:
             headers=headers,
             method="POST",
         )
+        return urlopen_json(req, timeout=120)
+
+    def _post(self, payload: dict) -> dict:
         try:
-            with urllib.request.urlopen(req, timeout=120) as r:
-                return json.loads(r.read().decode())
-        except urllib.error.HTTPError as e:
-            return {"error": e.read().decode(), "status": e.code}
+            return self._call(payload)
+        except AICoderError as e:
+            return {"error": e.message, "status": getattr(e, "status_code", None)}
         except Exception as e:
             return {"error": str(e)}
 
@@ -631,7 +682,8 @@ class AdaptiveThinkingCoder:
         self.model      = model
         self.max_tokens = max_tokens
 
-    def _post(self, payload: dict, betas: list[str] = None) -> dict:
+    @retry(max_attempts=4, base_delay=1.0, max_delay=15.0, breaker=_breaker)
+    def _call(self, payload: dict, betas: list[str] = None) -> dict:
         headers = {
             "Content-Type":      "application/json",
             "x-api-key":         self.api_key,
@@ -645,11 +697,13 @@ class AdaptiveThinkingCoder:
             headers=headers,
             method="POST",
         )
+        return urlopen_json(req, timeout=300)
+
+    def _post(self, payload: dict, betas: list[str] = None) -> dict:
         try:
-            with urllib.request.urlopen(req, timeout=300) as r:
-                return json.loads(r.read().decode())
-        except urllib.error.HTTPError as e:
-            return {"error": e.read().decode(), "status": e.code}
+            return self._call(payload, betas)
+        except AICoderError as e:
+            return {"error": e.message, "status": getattr(e, "status_code", None)}
         except Exception as e:
             return {"error": str(e)}
 

@@ -1,8 +1,10 @@
 """
 claude_search.py — Web Search & Web Fetch (Anthropic server tools)
-AI Model Coder CLI v1.8.0
+AI Model Coder CLI v1.23.0
 
 Enables Claude to search the web and fetch URLs in real-time.
+Uses web_search_20260318 and web_fetch_20260318 (latest versions,
+adds response_inclusion and use_cache params).
 
 CLI flags:
   --web-search            Enable web search tool
@@ -11,6 +13,9 @@ CLI flags:
   --fetch-url URL         Ask Claude to summarise a URL
   --max-searches N        Max web_search calls per turn (default 5)
   --citations             Show source citations in output
+  --search-response-inclusion full|excluded
+                          Control web_search result visibility in code_execution
+  --fetch-no-cache        Force fresh web_fetch (bypass cached content)
 """
 
 import sys
@@ -20,12 +25,12 @@ from typing import Optional
 
 
 WEB_SEARCH_TOOL = {
-    "type": "web_search_20250305",
+    "type": "web_search_20260318",
     "name": "web_search",
 }
 
 WEB_FETCH_TOOL = {
-    "type": "web_fetch_20250124",
+    "type": "web_fetch_20260318",
     "name": "web_fetch",
 }
 
@@ -33,7 +38,7 @@ WEB_FETCH_TOOL = {
 class SearchCoder:
     """Claude with web search and fetch tools."""
 
-    def __init__(self, api_key: str, model: str = "claude-sonnet-5",
+    def __init__(self, api_key: str, model: str = "claude-sonnet-4-6",
                  max_tokens: int = 4096):
         self.client     = anthropic.Anthropic(api_key=api_key)
         self.model      = model
@@ -47,15 +52,33 @@ class SearchCoder:
         web_fetch: bool = False,
         max_searches: int = 5,
         show_citations: bool = True,
+        search_response_inclusion: Optional[str] = None,
+        fetch_use_cache: Optional[bool] = None,
+        fetch_response_inclusion: Optional[str] = None,
     ) -> dict:
-        """Run prompt with web search / fetch tools enabled."""
+        """Run prompt with web search / fetch tools enabled.
+
+        search_response_inclusion: "full" or "excluded" — controls whether
+        the nested web_search_tool_result block is returned (or hidden when
+        consumed by code_execution in the same turn).
+
+        fetch_use_cache: True (default) or False (force fresh fetch).
+        fetch_response_inclusion: same as search_response_inclusion for fetch.
+        """
         tools = []
         if web_search:
             t = dict(WEB_SEARCH_TOOL)
             t["max_uses"] = max_searches
+            if search_response_inclusion in ("full", "excluded"):
+                t["response_inclusion"] = search_response_inclusion
             tools.append(t)
         if web_fetch:
-            tools.append(WEB_FETCH_TOOL)
+            t = dict(WEB_FETCH_TOOL)
+            if fetch_use_cache is not None:
+                t["use_cache"] = fetch_use_cache
+            if fetch_response_inclusion in ("full", "excluded"):
+                t["response_inclusion"] = fetch_response_inclusion
+            tools.append(t)
 
         kwargs = dict(
             model=self.model,
@@ -107,7 +130,9 @@ class SearchCoder:
 
 def cmd_web_search(prompt: str, api_key: str, model: str,
                    max_searches: int = 5, show_citations: bool = True,
-                   web_fetch: bool = False):
+                   web_fetch: bool = False,
+                   search_response_inclusion: Optional[str] = None,
+                   fetch_use_cache: Optional[bool] = None):
     print(f"\033[94mℹ Web Search enabled | max_searches={max_searches}\033[0m\n")
     sc = SearchCoder(api_key=api_key, model=model)
     result = sc.search(
@@ -116,6 +141,8 @@ def cmd_web_search(prompt: str, api_key: str, model: str,
         web_fetch=web_fetch,
         max_searches=max_searches,
         show_citations=show_citations,
+        search_response_inclusion=search_response_inclusion,
+        fetch_use_cache=fetch_use_cache,
     )
     print(result["response"])
     if show_citations and result["citations"]:

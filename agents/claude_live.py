@@ -13,7 +13,7 @@ import threading
 from typing import Optional, Dict, List, Any
 import anthropic
 
-from core.utils import sampling_kwargs
+from utils import sampling_kwargs
 
 LIVE_SYSTEM = (
     "You are an always-on assistant. Respond to the user's message directly. "

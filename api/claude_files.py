@@ -23,12 +23,15 @@ import urllib.error
 from pathlib import Path
 from typing import Optional
 
+from exceptions import AICoderError
+from resilience import CircuitBreaker, raise_for_http_error, retry, urlopen_json
 
-FILES_BASE    = "http://192.168.74.128:20128/v1/files"
-MESSAGES_BASE = "http://192.168.74.128:20128/v1/messages"
+FILES_BASE    = "https://api.anthropic.com/v1/files"
+MESSAGES_BASE = "https://api.anthropic.com/v1/messages"
 BETA_HEADER   = "files-api-2025-04-14"
 
 LOCAL_REGISTRY = Path(os.path.expanduser("~/.ai-coder/files_registry.json"))
+_breaker = CircuitBreaker(failure_threshold=5, reset_timeout=30)
 
 
 class FilesAPI:
@@ -46,6 +49,26 @@ class FilesAPI:
             "anthropic-beta":    BETA_HEADER,
             "Content-Type":      content_type,
         }
+
+    @retry(max_attempts=4, base_delay=1.0, max_delay=15.0, breaker=_breaker)
+    def _call_json(self, req: "urllib.request.Request", timeout: float) -> dict:
+        return urlopen_json(req, timeout=timeout)
+
+    @retry(max_attempts=4, base_delay=1.0, max_delay=15.0, breaker=_breaker)
+    def _call_bytes(self, req: "urllib.request.Request", timeout: float) -> bytes:
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                return r.read()
+        except (urllib.error.HTTPError, TimeoutError, ConnectionError, OSError) as e:
+            raise_for_http_error(e)
+
+    @retry(max_attempts=4, base_delay=1.0, max_delay=15.0, breaker=_breaker)
+    def _call_nobody(self, req: "urllib.request.Request", timeout: float) -> None:
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                r.read()
+        except (urllib.error.HTTPError, TimeoutError, ConnectionError, OSError) as e:
+            raise_for_http_error(e)
 
     # ── Upload ────────────────────────────────────────────────────────────
 
@@ -71,10 +94,9 @@ class FilesAPI:
 
         req = urllib.request.Request(FILES_BASE, data=body, headers=headers, method="POST")
         try:
-            with urllib.request.urlopen(req, timeout=60) as r:
-                result = json.loads(r.read().decode())
-        except urllib.error.HTTPError as e:
-            raise RuntimeError(f"Upload failed [{e.code}]: {e.read().decode()}")
+            result = self._call_json(req, timeout=60)
+        except AICoderError as e:
+            raise RuntimeError(f"Upload failed: {e.message}") from e
 
         # Save to local registry
         self._register(result, str(p))
@@ -89,11 +111,10 @@ class FilesAPI:
             method="GET",
         )
         try:
-            with urllib.request.urlopen(req, timeout=30) as r:
-                data = json.loads(r.read().decode())
-                return data.get("data", [])
-        except urllib.error.HTTPError as e:
-            raise RuntimeError(f"List failed [{e.code}]: {e.read().decode()}")
+            data = self._call_json(req, timeout=30)
+            return data.get("data", [])
+        except AICoderError as e:
+            raise RuntimeError(f"List failed: {e.message}") from e
 
     # ── Retrieve metadata ─────────────────────────────────────────────────
 
@@ -104,10 +125,9 @@ class FilesAPI:
             method="GET",
         )
         try:
-            with urllib.request.urlopen(req, timeout=30) as r:
-                return json.loads(r.read().decode())
-        except urllib.error.HTTPError as e:
-            raise RuntimeError(f"Get failed [{e.code}]: {e.read().decode()}")
+            return self._call_json(req, timeout=30)
+        except AICoderError as e:
+            raise RuntimeError(f"Get failed: {e.message}") from e
 
     # ── Download content ──────────────────────────────────────────────────
 
@@ -118,10 +138,9 @@ class FilesAPI:
             method="GET",
         )
         try:
-            with urllib.request.urlopen(req, timeout=60) as r:
-                data = r.read()
-        except urllib.error.HTTPError as e:
-            raise RuntimeError(f"Download failed [{e.code}]: {e.read().decode()}")
+            data = self._call_bytes(req, timeout=60)
+        except AICoderError as e:
+            raise RuntimeError(f"Download failed: {e.message}") from e
         Path(output_path).write_bytes(data)
         return output_path
 
@@ -134,12 +153,11 @@ class FilesAPI:
             method="DELETE",
         )
         try:
-            with urllib.request.urlopen(req, timeout=30) as r:
-                r.read()
+            self._call_nobody(req, timeout=30)
             self._unregister(file_id)
             return True
-        except urllib.error.HTTPError as e:
-            raise RuntimeError(f"Delete failed [{e.code}]: {e.read().decode()}")
+        except AICoderError as e:
+            raise RuntimeError(f"Delete failed: {e.message}") from e
 
     # ── Use file in Messages API ──────────────────────────────────────────
 
@@ -178,10 +196,9 @@ class FilesAPI:
             method="POST",
         )
         try:
-            with urllib.request.urlopen(req, timeout=120) as r:
-                data = json.loads(r.read().decode())
-        except urllib.error.HTTPError as e:
-            return f"[API ERROR {e.code}] {e.read().decode()}"
+            data = self._call_json(req, timeout=120)
+        except AICoderError as e:
+            return f"[API ERROR {getattr(e, 'status_code', '')}] {e.message}"
 
         return "".join(
             b.get("text", "") for b in data.get("content", [])

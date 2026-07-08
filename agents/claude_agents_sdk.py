@@ -1,6 +1,6 @@
 """
 claude_agents.py — Claude Agent SDK / Managed Agents
-AI Model Coder CLI v1.8.0
+AI Model Coder CLI v1.23.0
 
 Implements the Claude Agent SDK patterns:
   • Stateful sessions with persistent event history
@@ -25,6 +25,103 @@ CLI flags:
   --agent-subagent PROMPT  Spawn a subagent for a sub-task
   --agent-list-sessions    List saved sessions
   --agent-resume ID        Resume a session
+  --agent-memory-store NAME    Create/reuse a persistent Managed Agents
+                                memory store, mounted into the session
+                                started by --agent-managed-run (v1.19.0,
+                                agent-memory-2026-07-22 beta)
+  --agent-memory-store-create  Create a memory store standalone, without
+                                also running a task (v1.19.0)
+  --agent-dream STORE_ID        Run a Dreaming pass over a memory store,
+                                 curating it into a new output store
+                                 (v1.20.0, research preview,
+                                 dreaming-2026-04-21 beta)
+  --agent-dream-sessions IDS    Comma-separated session IDs to fold into
+                                 the dream, alongside the memory store
+  --agent-dream-instructions T  Optional steering text for the dream
+  --agent-dream-list            List non-archived dreams in the workspace
+  --agent-dream-get ID           Retrieve one dream's status/output
+  --agent-outcome DESC          With --agent-managed-run: define an outcome
+                                 (rubric-graded self-correction loop)
+                                 instead of a single plain task (v1.20.0,
+                                 public beta, part of managed-agents-2026-04-01)
+  --agent-outcome-rubric FILE   Markdown rubric file for --agent-outcome
+                                 (required alongside --agent-outcome)
+  --agent-outcome-max-iter N    max_iterations for the outcome loop
+                                 (default 3, max 20)
+  --agent-webhook-register URL  Register a webhook to be notified of
+                                 session/outcome/dream events (v1.20.0,
+                                 public beta)
+  --agent-webhook-events LIST   Comma-separated event types to subscribe
+                                 (with --agent-webhook-register)
+  --agent-vault-create NAME     Create a vault (v1.21.0, public beta)
+  --agent-vault-external-user ID  Optional external_user_id metadata for
+                                 --agent-vault-create
+  --agent-vault-add-credential VAULT_ID  Add a credential to a vault
+  --agent-vault-cred-type TYPE   mcp_oauth | static_bearer | environment_variable
+                                 (with --agent-vault-add-credential)
+  --agent-vault-mcp-url URL      MCP server URL (mcp_oauth/static_bearer)
+  --agent-vault-secret-name NAME Environment variable name (environment_variable)
+  --agent-vault-secret VALUE     The credential's secret value (write-only)
+  --agent-vault-allowed-domains LIST  Comma-separated allow-listed domains
+                                 (environment_variable)
+  --agent-vault-list             List vaults in the workspace
+  --agent-vault VAULT_ID         With --agent-managed-run: mount a vault's
+                                 credentials into the session
+  --agent-schedule-create AGENT_ID  Attach a cron schedule (v1.21.0,
+                                 public beta) to AGENT_ID
+  --agent-schedule-env ENV_ID    Environment id (with --agent-schedule-create)
+  --agent-schedule-cron EXPR     Cron expression (with --agent-schedule-create)
+  --agent-schedule-tz TZ         IANA timezone (default UTC)
+  --agent-schedule-task TEXT     Initial task text for the scheduled session
+  --agent-schedule-list          List scheduled deployments
+  --agent-schedule-cancel ID     Archive a scheduled deployment
+  --agent-deployment-runs        List deployment runs (execution history
+                                 for scheduled deployments)
+  --agent-deployment-run-filter ID  Filter --agent-deployment-runs by
+                                 deployment ID
+  --agent-deployment-run-id ID   Retrieve a specific deployment run
+  --agent-deployment-run-errors  Filter --agent-deployment-runs to errors
+  --agent-user-profile-list      List user profiles (multi-tenant attribution)
+  --agent-user-profile-create NAME  Create a user profile
+  --agent-user-profile-external-id ID  External ID (with --agent-user-profile-create)
+  --agent-review-multiagent PATH  Native Multiagent orchestration (v1.21.0):
+                                 parallel specialist code review over one
+                                 shared sandbox
+  --agent-review-specialists LIST  Comma-separated specialists (security,
+                                 style, test-coverage) for --agent-review-multiagent
+  --agent-outcome-rubric-upload FILE  Upload a rubric once via the Files
+                                 API, print its file_id (v1.21.0)
+  --agent-outcome-rubric-file ID  Reuse an uploaded rubric's file_id with
+                                 --agent-outcome instead of --agent-outcome-rubric
+
+Managed Agents memory stores vs. the other two "memory" features in this
+codebase — they solve different problems and don't overlap:
+  • claude_memory.py's memory_20250818 tool: client-side, you implement the
+    file-operation handlers yourself, scoped to whatever storage you wire
+    it to (local disk, DB, etc.), used with the plain Messages API.
+  • Claude Code's local .claude/auto MEMORY.md: lives only on the
+    developer's own machine, loaded into a Claude Code session's context.
+  • Managed Agents memory store (v1.19.0): server-side, Anthropic-hosted,
+    versioned, workspace-scoped, mounted as a `resources` entry when
+    creating a Managed Agents session.
+  • Dreaming (v1.20.0, this module): reads a memory store plus past
+    session transcripts and produces a *new, curated* output memory
+    store — merging duplicates, dropping stale entries, promoting
+    recurring patterns. It doesn't replace a memory store, it cleans one
+    up; the input store is never modified. Research preview, requires
+    `dreaming-2026-04-21` in addition to `managed-agents-2026-04-01`.
+
+Outcomes (v1.20.0) vs. just prompting harder: an outcome-oriented session
+gets a `user.define_outcome` event (description + rubric + max_iterations)
+instead of a plain `user.message`. A separate grader model evaluates the
+agent's work against the rubric in its own context window (so it isn't
+swayed by the agent's own reasoning) and the agent revises until the
+grader is satisfied or `max_iterations` is hit. Public beta, no extra
+beta header beyond `managed-agents-2026-04-01`.
+
+Webhooks (v1.20.0): out-of-band HTTP notifications for session/outcome/
+dream lifecycle events, so a long-running Managed Agents task doesn't
+need a client holding an SSE stream open the whole time. Public beta.
 """
 
 import os
@@ -36,9 +133,13 @@ import urllib.error
 from pathlib import Path
 from typing import Optional
 
+from exceptions import AICoderError
+from resilience import CircuitBreaker, raise_for_http_error, retry, urlopen_json
+
 
 SESSIONS_DIR = Path(os.path.expanduser("~/.ai-coder/agent_sessions"))
-ENDPOINT     = "http://192.168.74.128:20128/v1/messages"
+ENDPOINT     = "https://api.anthropic.com/v1/messages"
+_breaker = CircuitBreaker(failure_threshold=5, reset_timeout=30)
 
 
 # ── Permission modes ───────────────────────────────────────────────────────
@@ -136,7 +237,7 @@ class McpServerConfig:
 # still change shape — re-verify before depending on it for anything but
 # local dev/testing.
 MCP_TUNNELS_BETA = "mcp-tunnels-2026-06-22"
-TUNNELS_ENDPOINT = "http://192.168.74.128:20128/v1/tunnels"
+TUNNELS_ENDPOINT = "https://api.anthropic.com/v1/tunnels"
 
 
 class McpTunnel:
@@ -172,15 +273,18 @@ class McpTunnel:
             headers=self._headers(), method="POST",
         )
         try:
-            with urllib.request.urlopen(req, timeout=30) as r:
-                data = json.loads(r.read().decode())
-        except urllib.error.HTTPError as e:
-            return {"error": e.read().decode(), "status": e.code}
+            data = self._call(req)
+        except AICoderError as e:
+            return {"error": e.message, "status": getattr(e, "status_code", None)}
         except Exception as e:
             return {"error": str(e)}
         self.tunnel_id = data.get("id")
         self.public_url = data.get("url")
         return data
+
+    @retry(max_attempts=4, base_delay=1.0, max_delay=15.0, breaker=_breaker)
+    def _call(self, req: "urllib.request.Request") -> dict:
+        return urlopen_json(req, timeout=30)
 
     def close(self) -> dict:
         """Close a previously opened tunnel."""
@@ -191,12 +295,19 @@ class McpTunnel:
             headers=self._headers(), method="DELETE",
         )
         try:
-            with urllib.request.urlopen(req, timeout=30) as r:
-                return {"status": r.status}
-        except urllib.error.HTTPError as e:
-            return {"error": e.read().decode(), "status": e.code}
+            return self._call_delete(req)
+        except AICoderError as e:
+            return {"error": e.message, "status": getattr(e, "status_code", None)}
         except Exception as e:
             return {"error": str(e)}
+
+    @retry(max_attempts=4, base_delay=1.0, max_delay=15.0, breaker=_breaker)
+    def _call_delete(self, req: "urllib.request.Request") -> dict:
+        try:
+            with urllib.request.urlopen(req, timeout=30) as r:
+                return {"status": r.status}
+        except (urllib.error.HTTPError, TimeoutError, ConnectionError, OSError) as e:
+            raise_for_http_error(e)
 
     def as_mcp_server(self, name: str, transport: str = "sse") -> McpServerConfig:
         """Build an McpServerConfig pointing at this tunnel's public URL,
@@ -252,7 +363,8 @@ class ManagedAgent:
             "Always verify your work before finishing."
         )
 
-    def _post(self, payload: dict, beta: str = "") -> dict:
+    @retry(max_attempts=4, base_delay=1.0, max_delay=15.0, breaker=_breaker)
+    def _call(self, payload: dict, beta: str = "") -> dict:
         headers = {
             "Content-Type":      "application/json",
             "x-api-key":         self.api_key,
@@ -266,11 +378,13 @@ class ManagedAgent:
             headers=headers,
             method="POST",
         )
+        return urlopen_json(req, timeout=300)
+
+    def _post(self, payload: dict, beta: str = "") -> dict:
         try:
-            with urllib.request.urlopen(req, timeout=300) as r:
-                return json.loads(r.read().decode())
-        except urllib.error.HTTPError as e:
-            return {"error": e.read().decode(), "status": e.code}
+            return self._call(payload, beta)
+        except AICoderError as e:
+            return {"error": e.message, "status": getattr(e, "status_code", None)}
         except Exception as e:
             return {"error": str(e)}
 
@@ -404,6 +518,105 @@ class ManagedAgent:
 # for Zero Data Retention.
 MANAGED_AGENTS_BETA = "managed-agents-2026-04-01"
 
+# Managed Agents memory stores (v1.19.0) — a workspace-scoped, persistent,
+# versioned file directory mountable into a session's `resources`. Found via
+# the anthropic-sdk-python v0.116.0 release note "api: add
+# agent-memory-2026-07-22 beta header" (checked 2026-07-08); confirmed
+# against platform.claude.com/docs' Managed Agents memory pages the same
+# day. Not to be confused with the memory_20250818 client-side tool in
+# claude_memory.py, which is a completely separate, older (2025-09-29,
+# now GA) feature with different scope and storage model.
+MEMORY_STORE_BETA = "agent-memory-2026-07-22"
+
+# Dreaming (v1.20.0) — research preview: reads a memory store plus past
+# session transcripts and produces a new, curated output memory store.
+# Found via this cycle's audit re-checking Managed Agents docs for what
+# shipped alongside the memory-store feature closed in v1.19.0 (per that
+# cycle's own note that "Dreaming" was mentioned alongside it). Confirmed
+# genuinely absent: a first grep for "dream" found zero matches, and a
+# second, differently-worded grep for "curat|reflect.*session|memory.*
+# consolidat" also came up empty before this was written up as a gap.
+DREAMING_BETA = "dreaming-2026-04-21"
+
+# Vaults & credentials (v1.21.0, public beta) — per
+# platform.claude.com/docs/en/managed-agents/vaults (checked 2026-07-08):
+# no separate beta header beyond managed-agents-2026-04-01. A vault is a
+# workspace-scoped collection of third-party credentials (MCP OAuth,
+# static bearer, or environment-variable secrets for CLIs/SDKs) keyed to
+# an end user; referenced by vault_ids at session creation. The agent's
+# sandbox only ever sees an opaque placeholder for environment_variable
+# credentials — the real secret is substituted at the network egress
+# boundary, only on allow-listed domains. Distinct from
+# claude_admin_api.py's API-key management (Anthropic's own platform
+# keys) and from this project's own local .env (never sent to a
+# sandbox).
+
+# Scheduled deployments (v1.21.0, public beta) — per
+# platform.claude.com/docs/en/managed-agents/scheduled-deployments
+# (checked 2026-07-08): no separate beta header beyond
+# managed-agents-2026-04-01 either. A deployment pairs an agent +
+# environment + initial user.message event with a cron `schedule`
+# ({"type": "cron", "expression": ..., "timezone": ...}); each firing
+# starts a brand-new session. Distinct from --agent-orchestrate (one-
+# shot, client-invoked) and from claude_workflow.py (sequences steps
+# within a single invocation, never starts new sessions on a timer).
+MULTIAGENT_MAX_ROSTER = 20
+
+# Files API beta header, needed alongside MANAGED_AGENTS_BETA when an
+# Outcomes rubric is passed by file_id instead of inline text (v1.21.0).
+FILES_API_BETA = "files-api-2025-04-14"
+
+
+def build_multiagent_config(agents: list) -> dict:
+    """Build the {"type": "coordinator", "agents": [...]} dict passed as
+    `multiagent` to create_agent(), per platform.claude.com/docs/en/
+    managed-agents/multi-agent (checked 2026-07-08).
+
+    Each entry in `agents` may be:
+      - a plain agent_id string -> expanded to {"type": "agent", "id": id}
+      - {"type": "self"} -> lets the coordinator spawn copies of itself
+      - an already-shaped dict (e.g. {"type": "agent", "id": ..., "version": ...})
+        -> passed through unchanged
+
+    Raises ValueError if more than MULTIAGENT_MAX_ROSTER (20) entries are
+    given — the API itself enforces this limit, but failing fast client-
+    side gives a clearer error than a 4xx from the roster snapshot step."""
+    if len(agents) > MULTIAGENT_MAX_ROSTER:
+        raise ValueError(
+            f"multiagent coordinator supports at most {MULTIAGENT_MAX_ROSTER} "
+            f"agents in the roster, got {len(agents)}"
+        )
+    roster = []
+    for a in agents:
+        if isinstance(a, dict):
+            roster.append(a)
+        else:
+            roster.append({"type": "agent", "id": a})
+    return {"type": "coordinator", "agents": roster}
+
+
+# Small built-in system-prompt presets for the --agent-review-multiagent
+# CLI convenience wrapper (parallel specialist code review over one shared
+# sandbox — the concrete zcoder use case that un-deferred Multiagent
+# orchestration this cycle; see docs/35_upgrade_v1.21.0.md).
+REVIEW_SPECIALIST_PRESETS = {
+    "security": (
+        "You are a security reviewer. Read the code at the given path and "
+        "report vulnerabilities, unsafe input handling, secrets in source, "
+        "and unsafe dependency usage. Be specific: file, line, and fix."
+    ),
+    "style": (
+        "You are a style/lint reviewer. Read the code at the given path and "
+        "report style inconsistencies, naming issues, dead code, and "
+        "readability problems. Be specific: file, line, and fix."
+    ),
+    "test-coverage": (
+        "You are a test-coverage reviewer. Read the code at the given path "
+        "and report untested code paths, missing edge-case tests, and weak "
+        "assertions. Be specific: file, function, and what test to add."
+    ),
+}
+
 
 class ManagedAgentsClient:
     """Thin wrapper around the real Claude Managed Agents API
@@ -418,14 +631,25 @@ class ManagedAgentsClient:
 
     def create_agent(self, name: str, model: str = "claude-opus-4-8",
                      system: str = "You are a helpful coding assistant.",
-                     tools: Optional[list] = None) -> dict:
+                     tools: Optional[list] = None,
+                     multiagent: Optional[dict] = None) -> dict:
         """Create a persisted, versioned Agent config. tools defaults to the
         full pre-built agent_toolset_20260401 (bash, file ops, web search,
-        etc.) if not given."""
+        etc.) if not given.
+
+        `multiagent` (v1.21.0, public beta), when given, makes this agent a
+        *coordinator*: a {"type": "coordinator", "agents": [...]} dict (see
+        build_multiagent_config()) declaring up to 20 other agents it can
+        delegate to at runtime, sharing one sandbox filesystem and event
+        stream within a single session. Omitted by default — no change to
+        the existing single-agent behavior when not given."""
         tools = tools or [{"type": "agent_toolset_20260401"}]
+        kwargs = {}
+        if multiagent is not None:
+            kwargs["multiagent"] = multiagent
         agent = self.client.beta.agents.create(
             name=name, model={"id": model}, system=system, tools=tools,
-            betas=[MANAGED_AGENTS_BETA],
+            betas=[MANAGED_AGENTS_BETA], **kwargs,
         )
         return {"id": agent.id, "name": name, "model": model}
 
@@ -439,18 +663,178 @@ class ManagedAgentsClient:
         )
         return {"id": env.id, "name": name}
 
-    def create_session(self, agent_id: str, environment_id: str, title: str = "") -> dict:
+    def create_memory_store(self, name: str) -> dict:
+        """Create a workspace-scoped, persistent Managed Agents memory
+        store — a versioned, FUSE-mounted file directory that survives
+        across sessions. Distinct from `claude_memory.py`'s client-side
+        `memory_20250818` tool (which requires the caller's own app to
+        implement file-operation handlers, scoped to one conversation)
+        and from Claude Code's local `.claude`/`MEMORY.md` auto-memory
+        (which never leaves the developer's machine). A memory store
+        lives on Anthropic's infrastructure, is mounted into a session at
+        creation time as a `resources` entry, and every write gets an
+        immutable version for audit/point-in-time recovery. Public beta,
+        requires the `agent-memory-2026-07-22` beta header."""
+        store = self.client.beta.memory_stores.create(
+            name=name, betas=[MANAGED_AGENTS_BETA, MEMORY_STORE_BETA],
+        )
+        return {"id": store.id, "name": name}
+
+    def create_session(self, agent_id: str, environment_id: str, title: str = "",
+                       memory_store_id: Optional[str] = None,
+                       vault_ids: Optional[list] = None,
+                       agent_id_override: Optional[str] = None) -> dict:
+        """Create a session. If `memory_store_id` is given, mount that
+        memory store as a session resource so the agent can read/write it
+        through normal file tools — no memory-tool handler code required
+        on our end, since Anthropic hosts the storage.
+
+        If `vault_ids` (v1.21.0, public beta) is given, those vaults'
+        credentials are made available to the session — MCP servers the
+        agent declares are matched by mcp_server_url, and
+        environment_variable credentials are injected at network egress
+        for any allow-listed domain. Omitted by default: no regression to
+        the pre-v1.21.0 no-vault path, since `vault_ids` is only included
+        in the request when actually given.
+
+        If `agent_id_override` (v1.22.0) is given, use it as the `agent`
+        field in the session creation payload — overriding the default
+        agent configuration with a different agent id at session
+        construction time. This enables dynamic agent routing (switching
+        agents based on context) without changing the default agent
+        config. Omitted by default: falls back to `agent_id`, preserving
+        pre-v1.22.0 behavior."""
+        resources = None
+        betas = [MANAGED_AGENTS_BETA]
+        if memory_store_id:
+            resources = [{"type": "memory_store", "memory_store_id": memory_store_id}]
+            betas = [MANAGED_AGENTS_BETA, MEMORY_STORE_BETA]
+        kwargs = {}
+        if vault_ids:
+            kwargs["vault_ids"] = vault_ids
+        target_agent = agent_id_override if agent_id_override else agent_id
         session = self.client.beta.sessions.create(
-            agent=agent_id, environment_id=environment_id, title=title,
+            agent=target_agent, environment_id=environment_id, title=title,
+            resources=resources, betas=betas, **kwargs,
+        )
+        return {
+            "id": session.id, "agent_id": agent_id,
+            "agent_id_override": agent_id_override,
+            "environment_id": environment_id, "memory_store_id": memory_store_id,
+            "vault_ids": vault_ids,
+        }
+
+    # ── Vaults & credentials (v1.21.0, public beta) ──────────────────────
+    def create_vault(self, display_name: str, external_user_id: Optional[str] = None) -> dict:
+        """Create a workspace-scoped vault — the collection of credentials
+        for one end user. `external_user_id`, if given, is stored as
+        metadata so the vault can be mapped back to your own user
+        records; it isn't a structural field the API requires."""
+        metadata = {"external_user_id": external_user_id} if external_user_id else None
+        vault = self.client.beta.vaults.create(
+            display_name=display_name, metadata=metadata,
             betas=[MANAGED_AGENTS_BETA],
         )
-        return {"id": session.id, "agent_id": agent_id, "environment_id": environment_id}
+        return {"id": vault.id, "display_name": display_name,
+                "external_user_id": external_user_id}
+
+    def add_credential(self, vault_id: str, credential_type: str,
+                       mcp_server_url: Optional[str] = None,
+                       secret_name: Optional[str] = None,
+                       secret_value: str = "",
+                       allowed_domains: Optional[list] = None,
+                       injection_location: str = "headers") -> dict:
+        """Add a credential to a vault. credential_type is one of
+        "mcp_oauth", "static_bearer" (both keyed by mcp_server_url — the
+        token is injected automatically when the agent connects to an MCP
+        server at that URL), or "environment_variable" (keyed by
+        secret_name, restricted to allowed_domains — the sandbox only ever
+        holds an opaque placeholder, the real value is substituted at
+        network egress, so the model never sees it).
+
+        `injection_location` (v1.22.0) controls where the Egress Proxy
+        injects the secret into the outbound request for
+        environment_variable credentials. Must be one of "headers",
+        "body", or "both". Defaults to "headers" for backward
+        compatibility. Ignored for mcp_oauth and static_bearer types.
+
+        secret_value is write-only end to end: never logged, never
+        returned by the API, and must never appear in any exception
+        message raised from this method."""
+        if credential_type in ("mcp_oauth", "static_bearer"):
+            if not mcp_server_url:
+                raise ValueError(
+                    f"credential_type={credential_type!r} requires mcp_server_url"
+                )
+            auth = {"type": credential_type, "token": secret_value} \
+                if credential_type == "static_bearer" \
+                else {"type": credential_type, "access_token": secret_value}
+            cred = self.client.beta.vaults.credentials.create(
+                vault_id=vault_id, mcp_server_url=mcp_server_url, auth=auth,
+                betas=[MANAGED_AGENTS_BETA],
+            )
+        elif credential_type == "environment_variable":
+            if not secret_name:
+                raise ValueError("credential_type='environment_variable' requires secret_name")
+            if not allowed_domains:
+                raise ValueError("credential_type='environment_variable' requires allowed_domains")
+            valid_locations = ["headers", "body", "both"]
+            if injection_location not in valid_locations:
+                raise ValueError(
+                    f"Invalid injection_location {injection_location!r}: "
+                    f"must be one of {valid_locations}"
+                )
+            auth = {"type": credential_type, "secret_value": secret_value,
+                    "allowed_domains": allowed_domains,
+                    "injection_location": injection_location}
+            cred = self.client.beta.vaults.credentials.create(
+                vault_id=vault_id, secret_name=secret_name, auth=auth,
+                betas=[MANAGED_AGENTS_BETA],
+            )
+        else:
+            raise ValueError(
+                f"Unknown credential_type {credential_type!r}: expected "
+                f"'mcp_oauth', 'static_bearer', or 'environment_variable'"
+            )
+        return {"id": cred.id, "vault_id": vault_id, "credential_type": credential_type,
+                "mcp_server_url": mcp_server_url, "secret_name": secret_name,
+                "injection_location": injection_location
+                    if credential_type == "environment_variable" else None}
+
+    def list_vaults(self, include_archived: bool = False) -> list:
+        """List non-archived vaults in the workspace, newest first."""
+        page = self.client.beta.vaults.list(
+            include_archived=include_archived, betas=[MANAGED_AGENTS_BETA],
+        )
+        return [{"id": v.id, "display_name": v.display_name} for v in page]
+
+    def archive_vault(self, vault_id: str) -> dict:
+        """Archive a vault. Cascades to all its credentials (secrets are
+        purged; records are retained for auditing). Future sessions
+        referencing this vault fail; already-running sessions continue."""
+        vault = self.client.beta.vaults.archive(vault_id, betas=[MANAGED_AGENTS_BETA])
+        return {"id": vault.id, "archived": True}
+
+    def archive_credential(self, vault_id: str, credential_id: str) -> dict:
+        """Archive one credential. Purges the secret payload; the
+        credential's key (mcp_server_url or secret_name) stays visible and
+        is freed for a replacement credential."""
+        cred = self.client.beta.vaults.credentials.archive(
+            vault_id, credential_id, betas=[MANAGED_AGENTS_BETA],
+        )
+        return {"id": cred.id, "vault_id": vault_id, "archived": True}
 
     def run_task(self, session_id: str, task: str) -> dict:
         """Send a task as a user.message event and stream until the session
-        goes idle. Returns the accumulated assistant text and tool calls."""
+        goes idle. Returns the accumulated assistant text and tool calls.
+
+        v1.22.0: also yields `event_delta` events — incremental text
+        fragments that arrive before the complete `agent.message` event,
+        enabling real-time preview of agent output as it's generated
+        rather than waiting for the full message boundary."""
         text_parts: list[str] = []
         tool_calls: list[dict] = []
+        delta_parts: list[str] = []
         with self.client.beta.sessions.events.stream(session_id, betas=[MANAGED_AGENTS_BETA]) as stream:
             self.client.beta.sessions.events.send(
                 session_id,
@@ -458,7 +842,11 @@ class ManagedAgentsClient:
                 betas=[MANAGED_AGENTS_BETA],
             )
             for event in stream:
-                if event.type == "agent.message":
+                if event.type == "event_delta":
+                    delta = getattr(event, "delta", None)
+                    if delta:
+                        delta_parts.append(delta)
+                elif event.type == "agent.message":
                     for block in event.content:
                         if getattr(block, "text", None):
                             text_parts.append(block.text)
@@ -466,25 +854,551 @@ class ManagedAgentsClient:
                     tool_calls.append({"name": event.name})
                 elif event.type == "session.status_idle":
                     break
-        return {"text": "".join(text_parts), "tool_calls": tool_calls}
+        return {"text": "".join(text_parts), "tool_calls": tool_calls,
+                "deltas": "".join(delta_parts) if delta_parts else None}
 
 
-def cmd_managed_agent_run(task: str, api_key: str, model: str = "claude-opus-4-8"):
+    # ── Dreaming (v1.20.0, research preview) ────────────────────────────
+    def create_dream(self, memory_store_id: str, session_ids: Optional[list] = None,
+                     model: str = "claude-opus-4-8", instructions: Optional[str] = None) -> dict:
+        """Start a dream: curate `memory_store_id` (optionally alongside past
+        `session_ids` transcripts) into a new output memory store. The input
+        store is never modified — the dream produces a separate output store
+        you can review, adopt, or discard. Returns immediately with
+        status "pending"; poll get_dream() until status is a terminal state
+        (completed/failed/canceled)."""
+        inputs = [{"type": "memory_store", "memory_store_id": memory_store_id}]
+        if session_ids:
+            inputs.append({"type": "sessions", "session_ids": session_ids})
+        dream = self.client.beta.dreams.create(
+            inputs=inputs, model={"id": model}, instructions=instructions,
+            betas=[MANAGED_AGENTS_BETA, DREAMING_BETA],
+        )
+        return {"id": dream.id, "status": dream.status}
+
+    def get_dream(self, dream_id: str) -> dict:
+        """Retrieve a dream's current status and, once complete, the
+        output_store_id of the curated memory store it produced."""
+        dream = self.client.beta.dreams.retrieve(
+            dream_id, betas=[MANAGED_AGENTS_BETA, DREAMING_BETA],
+        )
+        output_store_id = None
+        for output in getattr(dream, "outputs", None) or []:
+            if getattr(output, "type", None) == "memory_store":
+                output_store_id = output.memory_store_id
+        return {"id": dream.id, "status": dream.status, "output_store_id": output_store_id,
+                "error": getattr(dream, "error", None)}
+
+    def list_dreams(self, include_archived: bool = False) -> list:
+        """List non-archived dreams in the workspace, newest first."""
+        page = self.client.beta.dreams.list(
+            include_archived=include_archived, betas=[MANAGED_AGENTS_BETA, DREAMING_BETA],
+        )
+        return [{"id": d.id, "status": d.status} for d in page]
+
+    def cancel_dream(self, dream_id: str) -> dict:
+        """Move a pending/running dream to canceled immediately."""
+        dream = self.client.beta.dreams.cancel(
+            dream_id, betas=[MANAGED_AGENTS_BETA, DREAMING_BETA],
+        )
+        return {"id": dream.id, "status": dream.status}
+
+    # ── Scheduled deployments (v1.21.0, public beta) ─────────────────────
+    def create_scheduled_deployment(self, agent_id: str, environment_id: str,
+                                    cron_expression: str, timezone: str = "UTC",
+                                    task: str = "", memory_store_id: Optional[str] = None,
+                                    name: str = "") -> dict:
+        """Attach a cron schedule to an agent + environment pair. Each time
+        the schedule fires, Managed Agents starts a brand-new session,
+        sends `task` as its initial user.message, and runs it to
+        completion — no external scheduler/cron host required on our
+        side. Distinct from --agent-orchestrate (one-shot, client-
+        invoked) and from claude_workflow.py (sequences steps within a
+        single invocation, doesn't start new sessions on a timer)."""
+        resources = None
+        if memory_store_id:
+            resources = [{"type": "memory_store", "memory_store_id": memory_store_id}]
+        deployment = self.client.beta.deployments.create(
+            name=name or f"scheduled-{agent_id}",
+            agent=agent_id, environment_id=environment_id,
+            schedule={"type": "cron", "expression": cron_expression, "timezone": timezone},
+            initial_events=[{"type": "user.message", "content": [{"type": "text", "text": task}]}],
+            resources=resources,
+            betas=[MANAGED_AGENTS_BETA],
+        )
+        return {"id": deployment.id, "agent_id": agent_id, "environment_id": environment_id,
+                "cron_expression": cron_expression, "timezone": timezone,
+                "status": getattr(deployment, "status", None)}
+
+    def list_scheduled_deployments(self) -> list:
+        """List scheduled deployments in the workspace, newest first."""
+        page = self.client.beta.deployments.list(betas=[MANAGED_AGENTS_BETA])
+        return [{"id": d.id, "status": getattr(d, "status", None)} for d in page]
+
+    def get_scheduled_deployment(self, deployment_id: str) -> dict:
+        """Retrieve one scheduled deployment's current status/schedule."""
+        d = self.client.beta.deployments.retrieve(deployment_id, betas=[MANAGED_AGENTS_BETA])
+        return {"id": d.id, "status": getattr(d, "status", None),
+                "schedule": getattr(d, "schedule", None)}
+
+    def cancel_scheduled_deployment(self, deployment_id: str) -> dict:
+        """Archive a scheduled deployment, stopping future scheduled runs
+        (an in-flight run, if any, finishes normally)."""
+        d = self.client.beta.deployments.archive(deployment_id, betas=[MANAGED_AGENTS_BETA])
+        return {"id": d.id, "status": getattr(d, "status", None)}
+
+    # ── Deployment runs (SDK v0.115.0+, public beta) ─────────────────────
+    # deployment_runs tracks the execution history of scheduled deployments.
+    # Each time a schedule fires, a new run is created. This was entirely
+    # absent from the project before the 2026-07-09 SDK introspection pass.
+    def list_deployment_runs(self, deployment_id: Optional[str] = None,
+                             has_error: Optional[bool] = None,
+                             limit: int = 20) -> list:
+        """List deployment runs, optionally filtered by deployment_id or
+        error status. Returns newest first. Each run represents one
+        execution of a scheduled deployment."""
+        kwargs = {"betas": [MANAGED_AGENTS_BETA], "limit": limit}
+        if deployment_id:
+            kwargs["deployment_id"] = deployment_id
+        if has_error is not None:
+            kwargs["has_error"] = has_error
+        page = self.client.beta.deployment_runs.list(**kwargs)
+        results = []
+        for r in page:
+            results.append({
+                "id": r.id,
+                "deployment_id": getattr(r, "deployment_id", None),
+                "status": getattr(r, "status", None),
+                "created_at": str(getattr(r, "created_at", "")),
+                "has_error": getattr(r, "has_error", None),
+                "trigger_type": getattr(r, "trigger_type", None),
+            })
+        return results
+
+    def get_deployment_run(self, run_id: str) -> dict:
+        """Retrieve a single deployment run's details."""
+        r = self.client.beta.deployment_runs.retrieve(run_id, betas=[MANAGED_AGENTS_BETA])
+        return {
+            "id": r.id,
+            "deployment_id": getattr(r, "deployment_id", None),
+            "status": getattr(r, "status", None),
+            "created_at": str(getattr(r, "created_at", "")),
+            "has_error": getattr(r, "has_error", None),
+            "trigger_type": getattr(r, "trigger_type", None),
+        }
+
+    # ── User profiles (SDK beta, multi-tenant management) ────────────────
+    # user_profiles manages the profile records used by the
+    # anthropic-user-profile-id header (coder.py). The header attributes
+    # requests to a profile; these methods create/list/update the profiles
+    # themselves. Entirely absent from the project before 2026-07-09.
+    def create_user_profile(self, name: str = "", external_id: str = "",
+                            relationship: str = "external",
+                            metadata: Optional[dict] = None) -> dict:
+        """Create a user profile for multi-tenant attribution.
+        relationship: 'external', 'resold', or 'internal'."""
+        kwargs = {"betas": ["user-profiles"]}
+        if name:
+            kwargs["name"] = name
+        if external_id:
+            kwargs["external_id"] = external_id
+        kwargs["relationship"] = relationship
+        if metadata:
+            kwargs["metadata"] = metadata
+        p = self.client.beta.user_profiles.create(**kwargs)
+        return {"id": p.id, "name": getattr(p, "name", None),
+                "external_id": getattr(p, "external_id", None)}
+
+    def list_user_profiles(self, limit: int = 50) -> list:
+        """List user profiles in the workspace."""
+        page = self.client.beta.user_profiles.list(
+            limit=limit, betas=["user-profiles"])
+        return [{"id": p.id, "name": getattr(p, "name", None),
+                 "external_id": getattr(p, "external_id", None)} for p in page]
+
+    def get_user_profile(self, profile_id: str) -> dict:
+        """Retrieve a single user profile."""
+        p = self.client.beta.user_profiles.retrieve(
+            profile_id, betas=["user-profiles"])
+        return {"id": p.id, "name": getattr(p, "name", None),
+                "external_id": getattr(p, "external_id", None),
+                "relationship": getattr(p, "relationship", None),
+                "metadata": getattr(p, "metadata", None)}
+
+    # ── Outcomes (v1.20.0, public beta; file_id rubric form v1.21.0) ─────
+    def define_outcome(self, session_id: str, description: str,
+                       rubric_text: Optional[str] = None,
+                       rubric_file_id: Optional[str] = None,
+                       max_iterations: int = 3) -> dict:
+        """Send a user.define_outcome event: the agent starts working
+        immediately toward `description`, revising until a grader (running
+        in its own context window, independent of the agent's reasoning)
+        is satisfied the rubric is met or `max_iterations` is hit. Do not
+        also send a user.message — the define_outcome event alone kicks
+        off the agent's work.
+
+        Exactly one of `rubric_text` (inline markdown) or `rubric_file_id`
+        (a file_id from the Files API — upload the rubric once, reuse it
+        by id across many outcome-oriented sessions) must be given."""
+        if bool(rubric_text) == bool(rubric_file_id):
+            raise ValueError(
+                "define_outcome requires exactly one of rubric_text or "
+                "rubric_file_id, not both or neither"
+            )
+        if rubric_file_id:
+            rubric = {"type": "file", "file_id": rubric_file_id}
+            betas = [MANAGED_AGENTS_BETA, FILES_API_BETA]
+        else:
+            rubric = {"type": "text", "content": rubric_text}
+            betas = [MANAGED_AGENTS_BETA]
+        result = self.client.beta.sessions.events.send(
+            session_id,
+            events=[{
+                "type": "user.define_outcome",
+                "description": description,
+                "rubric": rubric,
+                "max_iterations": max_iterations,
+            }],
+            betas=betas,
+        )
+        return {"session_id": session_id, "sent": True, "raw": result}
+
+    def wait_for_outcome(self, session_id: str) -> dict:
+        """Stream a session's events until the outcome reaches a terminal
+        span.outcome_evaluation_end (satisfied / needs_revision loop exhaustion
+        / max_iterations_reached / failed / interrupted), returning the
+        accumulated assistant text like run_task()."""
+        text_parts: list[str] = []
+        result_state = None
+        with self.client.beta.sessions.events.stream(session_id, betas=[MANAGED_AGENTS_BETA]) as stream:
+            for event in stream:
+                if event.type == "agent.message":
+                    for block in event.content:
+                        if getattr(block, "text", None):
+                            text_parts.append(block.text)
+                elif event.type == "span.outcome_evaluation_end":
+                    result_state = getattr(event, "result", None)
+                elif event.type == "session.status_idle":
+                    break
+        return {"text": "".join(text_parts), "result": result_state}
+
+    # ── Webhooks (v1.20.0, public beta) ─────────────────────────────────
+    def register_webhook(self, url: str, event_types: Optional[list] = None) -> dict:
+        """Subscribe a URL to Managed Agents lifecycle events (session,
+        outcome, dream). If event_types is omitted, subscribes to all
+        event types the endpoint supports."""
+        webhook = self.client.beta.webhooks.create(
+            url=url, event_types=event_types or None,
+            betas=[MANAGED_AGENTS_BETA],
+        )
+        return {"id": webhook.id, "url": url, "event_types": event_types}
+
+
+def cmd_managed_agent_run(task: str, api_key: str, model: str = "claude-opus-4-8",
+                          memory_store: Optional[str] = None,
+                          outcome_description: Optional[str] = None,
+                          outcome_rubric: Optional[str] = None,
+                          outcome_rubric_file_id: Optional[str] = None,
+                          outcome_max_iterations: int = 3,
+                          vault_id: Optional[str] = None):
     """End-to-end convenience: create a throwaway agent + environment +
     session, run one task, print the result. For anything beyond a single
     one-off task, create the agent/environment once and reuse them across
-    sessions instead — see ManagedAgentsClient methods."""
+    sessions instead — see ManagedAgentsClient methods.
+
+    If `memory_store` is given (a store name, new or existing), it's
+    created if needed and mounted into the session so the agent's work
+    persists past this one throwaway session — pass the same name next
+    time to keep building on it.
+
+    If `outcome_description` and either `outcome_rubric` (inline markdown
+    text) or `outcome_rubric_file_id` (a Files API file_id, v1.21.0) are
+    given, the session runs as an outcome-oriented loop instead of a
+    single plain task: `task` is ignored and the agent works toward
+    `outcome_description` until a separate grader is satisfied the rubric
+    is met or `outcome_max_iterations` is reached — see define_outcome().
+
+    If `vault_id` (v1.21.0, public beta) is given, that vault's
+    credentials are mounted into the session so any MCP servers or CLIs
+    the agent uses can authenticate without the model ever seeing a raw
+    secret — see ManagedAgentsClient.create_vault()/add_credential()."""
     mac = ManagedAgentsClient(api_key)
     print("\033[94mℹ Creating Managed Agent, environment, and session…\033[0m")
     agent = mac.create_agent(name=f"ai-coder-task-{uuid.uuid4().hex[:8]}", model=model)
     env   = mac.create_environment(name=f"ai-coder-env-{uuid.uuid4().hex[:8]}")
-    sess  = mac.create_session(agent["id"], env["id"], title=task[:60])
+    store_id = None
+    if memory_store:
+        store = mac.create_memory_store(name=memory_store)
+        store_id = store["id"]
+        print(f"\033[94mℹ memory store '{memory_store}' -> {store_id}\033[0m")
+    title = (outcome_description or task)[:60]
+    vault_ids = [vault_id] if vault_id else None
+    sess  = mac.create_session(agent["id"], env["id"], title=title, memory_store_id=store_id,
+                               vault_ids=vault_ids)
     print(f"\033[92m✓ session {sess['id']}\033[0m — running task…\n")
+
+    if outcome_description and (outcome_rubric or outcome_rubric_file_id):
+        mac.define_outcome(sess["id"], outcome_description,
+                           rubric_text=outcome_rubric,
+                           rubric_file_id=outcome_rubric_file_id,
+                           max_iterations=outcome_max_iterations)
+        result = mac.wait_for_outcome(sess["id"])
+        print(result["text"])
+        print(f"\n\033[90m[outcome result: {result['result']}]\033[0m")
+        return result
+
     result = mac.run_task(sess["id"], task)
     print(result["text"])
     if result["tool_calls"]:
         print(f"\n\033[90m[tools used: {', '.join(t['name'] for t in result['tool_calls'])}]\033[0m")
     return result
+
+
+def cmd_agent_memory_store_create(name: str, api_key: str) -> dict:
+    """Standalone helper: create a Managed Agents memory store without
+    also spinning up an agent/environment/session, so it can be created
+    once and reused across many `--agent-managed-run` invocations via
+    `--agent-memory-store`."""
+    mac = ManagedAgentsClient(api_key)
+    store = mac.create_memory_store(name=name)
+    print(f"\033[92m✓ memory store created\033[0m  id={store['id']}  name={store['name']}")
+    return store
+
+
+def cmd_agent_vault_create(display_name: str, api_key: str,
+                           external_user_id: Optional[str] = None) -> dict:
+    """Create a vault (v1.21.0, public beta) — a workspace-scoped
+    collection of one end user's third-party credentials, referenced by
+    vault_id from --agent-managed-run --agent-vault or from
+    create_session()'s vault_ids."""
+    mac = ManagedAgentsClient(api_key)
+    vault = mac.create_vault(display_name=display_name, external_user_id=external_user_id)
+    print(f"\033[92m✓ vault created\033[0m  id={vault['id']}  display_name={display_name}")
+    print(f"  Add a credential: ai-coder --agent-vault-add-credential {vault['id']} "
+          f"--agent-vault-cred-type static_bearer --agent-vault-mcp-url URL --agent-vault-secret TOKEN")
+    return vault
+
+
+def cmd_agent_vault_add_credential(vault_id: str, credential_type: str, api_key: str,
+                                   mcp_server_url: Optional[str] = None,
+                                   secret_name: Optional[str] = None,
+                                   secret_value: str = "",
+                                   allowed_domains: Optional[list] = None,
+                                   injection_location: str = "headers") -> dict:
+    """Add a credential to an existing vault. Never prints secret_value —
+    it's write-only, matching the docs' framing of these fields as
+    sensitive. `injection_location` (v1.22.0) controls where the Egress
+    Proxy injects the secret for environment_variable credentials."""
+    mac = ManagedAgentsClient(api_key)
+    cred = mac.add_credential(vault_id, credential_type, mcp_server_url=mcp_server_url,
+                              secret_name=secret_name, secret_value=secret_value,
+                              allowed_domains=allowed_domains,
+                              injection_location=injection_location)
+    print(f"\033[92m✓ credential added\033[0m  id={cred['id']}  vault_id={vault_id}  "
+          f"type={credential_type}")
+    return cred
+
+
+def cmd_agent_vault_list(api_key: str) -> list:
+    mac = ManagedAgentsClient(api_key)
+    vaults = mac.list_vaults()
+    for v in vaults:
+        print(f"  {v['id']}  {v['display_name']}")
+    if not vaults:
+        print("  (no vaults found)")
+    return vaults
+
+
+def cmd_agent_dream(store_id: str, api_key: str, model: str = "claude-opus-4-8",
+                    session_ids: Optional[list] = None, instructions: Optional[str] = None) -> dict:
+    """Start a Dreaming pass over a memory store (research preview) and
+    print the pending dream's id — dreams run asynchronously, poll with
+    --agent-dream-get to check status/output_store_id."""
+    mac = ManagedAgentsClient(api_key)
+    dream = mac.create_dream(store_id, session_ids=session_ids, model=model, instructions=instructions)
+    print(f"\033[92m✓ dream started\033[0m  id={dream['id']}  status={dream['status']}")
+    print(f"\033[90m  Poll: ai-coder --agent-dream-get {dream['id']}\033[0m")
+    return dream
+
+
+def cmd_agent_dream_get(dream_id: str, api_key: str) -> dict:
+    mac = ManagedAgentsClient(api_key)
+    dream = mac.get_dream(dream_id)
+    print(f"dream {dream['id']}: status={dream['status']}")
+    if dream.get("output_store_id"):
+        print(f"  output_store_id={dream['output_store_id']}")
+    if dream.get("error"):
+        print(f"  \033[91merror: {dream['error']}\033[0m")
+    return dream
+
+
+def cmd_agent_dream_list(api_key: str) -> list:
+    mac = ManagedAgentsClient(api_key)
+    dreams = mac.list_dreams()
+    for d in dreams:
+        print(f"  {d['id']}  status={d['status']}")
+    if not dreams:
+        print("  (no dreams found)")
+    return dreams
+
+
+def cmd_agent_schedule_create(agent_id: str, environment_id: str, cron_expression: str,
+                              api_key: str, timezone: str = "UTC", task: str = "") -> dict:
+    """Attach a cron schedule (v1.21.0, public beta) to an existing agent +
+    environment. Requires an agent_id/environment_id created ahead of
+    time via ManagedAgentsClient.create_agent()/create_environment() —
+    unlike --agent-managed-run, a scheduled deployment reuses a
+    persistent agent/environment rather than a throwaway pair, since it
+    needs to keep firing after this command returns."""
+    mac = ManagedAgentsClient(api_key)
+    dep = mac.create_scheduled_deployment(agent_id, environment_id, cron_expression,
+                                          timezone=timezone, task=task)
+    print(f"\033[92m✓ scheduled deployment created\033[0m  id={dep['id']}  "
+          f"cron='{cron_expression}' tz={timezone}")
+    return dep
+
+
+def cmd_agent_schedule_list(api_key: str) -> list:
+    mac = ManagedAgentsClient(api_key)
+    deployments = mac.list_scheduled_deployments()
+    for d in deployments:
+        print(f"  {d['id']}  status={d['status']}")
+    if not deployments:
+        print("  (no scheduled deployments found)")
+    return deployments
+
+
+def cmd_agent_schedule_cancel(deployment_id: str, api_key: str) -> dict:
+    mac = ManagedAgentsClient(api_key)
+    dep = mac.cancel_scheduled_deployment(deployment_id)
+    print(f"\033[92m✓ scheduled deployment archived\033[0m  id={dep['id']}")
+    return dep
+
+
+def cmd_agent_deployment_runs(api_key: str, deployment_id: str = "",
+                               has_error: bool = None,
+                               run_id: str = "") -> list:
+    """List or retrieve deployment runs (execution history for scheduled
+    deployments). Pass --agent-deployment-run-id to get one run."""
+    mac = ManagedAgentsClient(api_key)
+    if run_id:
+        run = mac.get_deployment_run(run_id)
+        print(f"  run {run['id']}:  status={run['status']}  "
+              f"created={run['created_at'][:19] if run['created_at'] else '?'}"
+              f"  error={run['has_error']}")
+        return [run]
+    runs = mac.list_deployment_runs(
+        deployment_id=deployment_id or None, has_error=has_error)
+    for r in runs:
+        err_flag = " \033[91m✗ error\033[0m" if r.get("has_error") else ""
+        print(f"  {r['id']}  status={r['status']}  "
+              f"created={str(r.get('created_at',''))[:19]}{err_flag}")
+    if not runs:
+        print("  (no deployment runs found)")
+    return runs
+
+
+def cmd_agent_user_profile_list(api_key: str) -> list:
+    """List user profiles for multi-tenant attribution."""
+    mac = ManagedAgentsClient(api_key)
+    profiles = mac.list_user_profiles()
+    for p in profiles:
+        print(f"  {p['id']}  name={p.get('name','')}  "
+              f"external_id={p.get('external_id','')}")
+    if not profiles:
+        print("  (no user profiles found)")
+    return profiles
+
+
+def cmd_agent_user_profile_create(name: str, api_key: str,
+                                   external_id: str = "",
+                                   relationship: str = "external") -> dict:
+    """Create a user profile for multi-tenant billing attribution."""
+    mac = ManagedAgentsClient(api_key)
+    profile = mac.create_user_profile(
+        name=name, external_id=external_id, relationship=relationship)
+    print(f"\033[92m✓ user profile created\033[0m  id={profile['id']}  "
+          f"name={profile.get('name','')}")
+    return profile
+
+
+def cmd_agent_webhook_register(url: str, api_key: str, events: Optional[list] = None) -> dict:
+    mac = ManagedAgentsClient(api_key)
+    webhook = mac.register_webhook(url, event_types=events)
+    print(f"\033[92m✓ webhook registered\033[0m  id={webhook['id']}  url={url}")
+    if events:
+        print(f"  events: {', '.join(events)}")
+    return webhook
+
+
+def cmd_agent_review_multiagent(path: str, specialists: list, api_key: str,
+                                model: str = "claude-opus-4-8") -> dict:
+    """Native Multiagent orchestration (v1.21.0, un-deferred from
+    v1.20.0): run named specialist code reviewers (see
+    REVIEW_SPECIALIST_PRESETS) as parallel subagents that share one
+    sandbox filesystem and one event stream within a single Managed
+    Agents session, with a lead/coordinator agent synthesizing one
+    combined report. This is the shared-sandbox, cross-subagent-
+    visibility case --agent-orchestrate cannot do (that makes
+    independent Messages API calls with no shared filesystem)."""
+    unknown = [s for s in specialists if s not in REVIEW_SPECIALIST_PRESETS]
+    if unknown:
+        raise ValueError(
+            f"Unknown specialist(s) {unknown}: choose from "
+            f"{sorted(REVIEW_SPECIALIST_PRESETS)}"
+        )
+    mac = ManagedAgentsClient(api_key)
+    print(f"\033[94mℹ Creating {len(specialists)} specialist agent(s)…\033[0m")
+    specialist_ids = []
+    for name in specialists:
+        agent = mac.create_agent(
+            name=f"review-{name}-{uuid.uuid4().hex[:8]}", model=model,
+            system=REVIEW_SPECIALIST_PRESETS[name],
+        )
+        specialist_ids.append(agent["id"])
+        print(f"  {name} -> {agent['id']}")
+
+    coordinator_system = (
+        "You are the lead reviewer coordinating specialist subagents "
+        f"({', '.join(specialists)}) that all share this sandbox's "
+        "filesystem. Delegate the checked-out codebase to each specialist, "
+        "wait for their findings, then synthesize one combined report "
+        "referencing all of them, organized by severity."
+    )
+    coordinator = mac.create_agent(
+        name=f"review-coordinator-{uuid.uuid4().hex[:8]}", model=model,
+        system=coordinator_system,
+        multiagent=build_multiagent_config(specialist_ids),
+    )
+    env  = mac.create_environment(name=f"ai-coder-review-env-{uuid.uuid4().hex[:8]}")
+    sess = mac.create_session(coordinator["id"], env["id"],
+                              title=f"multiagent review: {path}"[:60])
+    print(f"\033[92m✓ session {sess['id']}\033[0m — running review…\n")
+
+    task = (
+        f"Review the codebase checked out at {path}. Delegate to the "
+        f"{', '.join(specialists)} specialist(s), then synthesize one "
+        "combined report referencing all of their findings."
+    )
+    result = mac.run_task(sess["id"], task)
+    print(result["text"])
+    return result
+
+
+def cmd_agent_outcome_rubric_upload(file_path: str, api_key: str, model: str) -> str:
+    """Upload a local rubric markdown file once via the Files API and
+    print its file_id, so it can be reused across many --agent-outcome
+    invocations with --agent-outcome-rubric-file FILE_ID instead of
+    re-reading the local file into the request body every time (v1.21.0,
+    the file_id form of define_outcome()'s rubric)."""
+    from claude_files import FilesAPI
+    fa = FilesAPI(api_key=api_key, model=model)
+    print(f"\033[94mℹ Uploading rubric {file_path}…\033[0m")
+    result = fa.upload(file_path)
+    print(f"\033[92m✓ rubric uploaded\033[0m  file_id={result['id']}")
+    print(f"  Reuse with: ai-coder --agent-managed-run \"...\" --agent-outcome \"...\" "
+          f"--agent-outcome-rubric-file {result['id']}")
+    return result["id"]
 
 
 # ── CLI entry points ───────────────────────────────────────────────────────

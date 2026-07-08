@@ -10,6 +10,15 @@ pricing of $2/$10 per MTok through 2026-08-31 — SONNET5_INTRO_PRICE
 reflects that; PRICE["claude-sonnet-5"] holds the standing $3/$15 rate
 used once the intro window ends. Re-verify before relying on this for
 billing-sensitive decisions.
+
+Note: everything in this module is a *local estimate* built from token
+counts this CLI is told about after a call completes — it never queries a
+real usage/spend endpoint, and has no way to see calls made outside this
+CLI. For actual org-level historical usage and cost data (the real
+numbers Anthropic bills against), see claude_admin_api.py's
+get_usage_report()/get_cost_report() and --usage-report — that requires
+an Admin API key rather than a regular one, which is why it's a separate
+module instead of folded into local estimation here.
 """
 
 import json
@@ -19,7 +28,7 @@ from typing import Dict, Optional, Tuple
 from dataclasses import dataclass, field
 from datetime import datetime
 import anthropic
-from core.utils import sampling_kwargs
+from utils import sampling_kwargs
 
 SPEND_LOG = Path.home() / ".ai-coder" / "cost_log.json"
 

@@ -20,8 +20,14 @@ import urllib.error
 from pathlib import Path
 from typing import Optional
 
+from exceptions import AICoderError
+from resilience import CircuitBreaker, retry, urlopen_json
 
-ENDPOINT = "http://192.168.74.128:20128/v1/messages"
+ENDPOINT = "https://api.anthropic.com/v1/messages"
+
+# Shared per-process so repeated failures across CitationsCoder instances
+# trip the breaker once, same rationale as coder.py's _default_breaker.
+_breaker = CircuitBreaker(failure_threshold=5, reset_timeout=30)
 
 
 class CitationsCoder:
@@ -33,7 +39,8 @@ class CitationsCoder:
         self.model      = model
         self.max_tokens = max_tokens
 
-    def _post(self, payload: dict, beta: str = "") -> dict:
+    @retry(max_attempts=4, base_delay=1.0, max_delay=15.0, breaker=_breaker)
+    def _call(self, payload: dict, beta: str = "") -> dict:
         headers = {
             "Content-Type":      "application/json",
             "x-api-key":         self.api_key,
@@ -47,11 +54,16 @@ class CitationsCoder:
             headers=headers,
             method="POST",
         )
+        return urlopen_json(req, timeout=120)
+
+    def _post(self, payload: dict, beta: str = "") -> dict:
+        # Preserves the pre-existing {"error": ..., "status": ...} contract
+        # that cite_documents()/cite_web() below already check for, while
+        # retrying transient/rate-limit failures underneath via _call().
         try:
-            with urllib.request.urlopen(req, timeout=120) as r:
-                return json.loads(r.read().decode())
-        except urllib.error.HTTPError as e:
-            return {"error": e.read().decode(), "status": e.code}
+            return self._call(payload, beta)
+        except AICoderError as e:
+            return {"error": e.message, "status": getattr(e, "status_code", None)}
 
     # ── Document citations ────────────────────────────────────────────────
 

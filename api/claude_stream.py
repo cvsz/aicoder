@@ -1,6 +1,6 @@
 """
 claude_stream.py — Streaming Messages
-AI Model Coder CLI v1.11.0
+AI Model Coder CLI v1.23.0
 
 Real-time streaming of Claude responses using SSE.
 Displays tokens as they arrive rather than waiting for full response.
@@ -60,9 +60,12 @@ def handle_refusal(response_or_stop_details) -> Optional[dict]:
     """Read stop_details off a (non-streaming) response dict or a
     message_delta event's stop_details field. Returns {"category": ...,
     "explanation": ...} when the response was a refusal with no output
-    generated, or None otherwise. category is "cyber", "bio", or null per
-    the current docs — use it to route to a different fallback/support flow
-    instead of just showing the raw refusal text. Refusal-only responses
+    generated, or None otherwise. category is one of "cyber", "bio",
+    "frontier_llm", "reasoning_extraction", or null per the current docs
+    (platform.claude.com/docs, checked 2026-07-09 — the last two were added
+    with the Fable 5 cyber safeguards and jailbreak severity framework).
+    Use it to route to a different fallback/support flow instead of just
+    showing the raw refusal text. Refusal-only responses
     (stop_reason:"refusal" with no generated output) are documented as not
     billed, so this is also useful as a signal to skip cost bookkeeping for
     that call — see claude_cost_optimizer.py / claude_metrics.py."""
@@ -147,17 +150,49 @@ class StreamCoder:
                         usage_data = {
                             "output_tokens": getattr(usage, "output_tokens", 0),
                         }
+                        # output_tokens_details (SDK v0.105.0+): breakdown of
+                        # output tokens including thinking_tokens. Read-only,
+                        # doesn't affect billing (output_tokens is authoritative).
+                        details = getattr(usage, "output_tokens_details", None)
+                        if details:
+                            usage_data["thinking_tokens"] = getattr(
+                                details, "thinking_tokens", 0)
 
                 elif etype == "message_start":
                     msg   = getattr(event, "message", None)
                     usage = getattr(msg, "usage", None) if msg else None
                     if usage:
                         usage_data["input_tokens"] = getattr(usage, "input_tokens", 0)
+                        # Cache details may also appear on message_start
+                        cache = getattr(usage, "cache_creation_input_tokens", None)
+                        if cache is not None:
+                            usage_data["cache_creation_input_tokens"] = cache
+                        cache_read = getattr(usage, "cache_read_input_tokens", None)
+                        if cache_read is not None:
+                            usage_data["cache_read_input_tokens"] = cache_read
+
+                elif etype == "system_message":
+                    # SDK v0.112.0: system.message streaming events fire when
+                    # mid-conversation system messages are processed. No action
+                    # needed — the message content is already in the request
+                    # we sent — but acknowledge the event to avoid surprises.
+                    pass
 
         print()  # final newline
         if usage_data:
-            print(f"\033[90m[tokens] in={usage_data.get('input_tokens',0)}  "
-                  f"out={usage_data.get('output_tokens',0)}\033[0m")
+            in_tok  = usage_data.get('input_tokens', 0)
+            out_tok = usage_data.get('output_tokens', 0)
+            think   = usage_data.get('thinking_tokens')
+            cache_w = usage_data.get('cache_creation_input_tokens')
+            cache_r = usage_data.get('cache_read_input_tokens')
+            parts = [f"in={in_tok}", f"out={out_tok}"]
+            if think is not None and think > 0:
+                parts.append(f"thinking={think}")
+            if cache_w is not None and cache_w > 0:
+                parts.append(f"cache_w={cache_w}")
+            if cache_r is not None and cache_r > 0:
+                parts.append(f"cache_r={cache_r}")
+            print(f"\033[90m[tokens] {'  '.join(parts)}\033[0m")
 
         return full_text
 

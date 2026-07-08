@@ -1,21 +1,24 @@
 #!/usr/bin/env python3
 """
 main.py — AI Model Coder CLI
-Version 1.12.0 "Release" | Standalone packaging merged in from the
-ai-coder-cli-v2 lineage (PyInstaller build, setup scripts, LICENSE) —
-no functional/API changes from v1.11.1, this is a packaging-only release
+Version 1.22.0 | Adds Session-Level Agent Overrides, Vault Credential
+Injection Location controls, Streamed Event Deltas, and Code Execution
+version upgrade — closing four gaps found by re-running the ROADMAP.md
+gap-audit methodology against platform.claude.com/docs. See
+docs/35_upgrade_v1.22.0.md, CHANGELOG.md, and ROADMAP.md.
 """
 import argparse
 import os
 import sys
+from pathlib import Path
 
 # Both are tiny, dependency-free dicts (no urllib/API calls at import time),
 # so importing them eagerly to build argparse `choices=` is cheap and keeps
 # the CLI's advertised choices in sync with the actual data instead of a
 # second hardcoded list drifting from it.
-from core.personalities import PERSONALITIES
+from personalities import PERSONALITIES
 
-VERSION = "1.12.1"
+VERSION = "1.22.0"
 BANNER  = f"\033[94mAI Model Coder CLI v{VERSION}\033[0m"
 
 # Named agent roles. Previously these seven names only existed as a
@@ -61,14 +64,17 @@ def _read_file(path):
 
 
 def build_parser():
-    from api.claude_models import UPGRADE_TARGETS
+    from claude_models import UPGRADE_TARGETS
     p = argparse.ArgumentParser(prog="ai-coder",
         description=f"AI Model Coder CLI v{VERSION}",
         formatter_class=argparse.RawTextHelpFormatter)
 
     g = p.add_argument_group("Global")
     g.add_argument("-p", "--prompt");  g.add_argument("-f", "--file")
-    g.add_argument("-o", "--output");  g.add_argument("-i", "--interactive", action="store_true")
+    g.add_argument("-o", "--output");  g.add_argument("-i", "--interactive", action="store_true",
+                   help="Start a persistent multi-turn chat REPL (see claude_interactive.py)")
+    g.add_argument("--interactive-system", metavar="TEXT", dest="interactive_system",
+                   help="Starting system prompt for --interactive")
     g.add_argument("--model", default="claude-sonnet-5")
     g.add_argument("--temperature", type=float, default=0.3)
     g.add_argument("--max-tokens", type=int, default=4096, dest="max_tokens")
@@ -85,6 +91,16 @@ def build_parser():
     g.add_argument("--fast-mode", action="store_true", dest="fast_mode",
                    help="Research-preview reduced-latency mode (speed:\"fast\"); "
                         "currently Opus-only and billed at a premium rate")
+    g.add_argument("--user-profile", metavar="PROFILE_ID", default=None,
+                   dest="user_profile",
+                   help="Attribute this request to a user profile (beta: "
+                        "user-profiles header); for multi-tenant billing")
+    g.add_argument("--health-check", action="store_true", dest="health_check",
+                   help="Run liveness/readiness checks and exit (config, API key, "
+                        "disk-writable); prints JSON, exit code 0=healthy 1=unhealthy")
+    g.add_argument("--health-check-deep", action="store_true", dest="health_check_deep",
+                   help="With --health-check, also make one minimal live API call "
+                        "(use for a startup probe, not a frequent liveness probe)")
 
     sa = p.add_argument_group("Skills & Agents")
     # --skill/--agent were accepted by the parser and never read anywhere
@@ -151,10 +167,21 @@ def build_parser():
     th = p.add_argument_group("Extended Thinking")
     th.add_argument("--thinking", action="store_true")
     th.add_argument("--thinking-budget", type=int, default=8000, dest="thinking_budget")
-    th.add_argument("--effort", default="", choices=["","low","medium","high","max"])
+    th.add_argument("--effort", default="", choices=["","low","medium","high","xhigh","max"])
     th.add_argument("--adaptive", action="store_true")
     th.add_argument("--interleaved-thinking", action="store_true", dest="interleaved_thinking")
     th.add_argument("--show-thinking", action="store_true", dest="show_thinking")
+    th.add_argument("--thinking-display", default=None,
+                    choices=[None, "summarized", "omitted"],
+                    dest="thinking_display",
+                    help="Thinking display mode: summarized (stream thinking "
+                         "content) or omitted (skip streaming, reduce latency; "
+                         "full thinking tokens still billed)")
+    th.add_argument("--thinking-allow-manual", action="store_true",
+                    dest="thinking_allow_manual",
+                    help="Bypass the adaptive-only gate — allow 'enabled' "
+                         "thinking on models that normally require adaptive "
+                         "(use with caution — the API may 400)")
 
     p.add_argument("--stream", action="store_true")
 
@@ -163,6 +190,14 @@ def build_parser():
     ws.add_argument("--web-fetch", action="store_true")
     ws.add_argument("--max-searches", type=int, default=5, dest="max_searches")
     ws.add_argument("--no-citations", action="store_true", dest="no_citations")
+    ws.add_argument("--search-response-inclusion", default=None,
+                    choices=[None, "full", "excluded"],
+                    dest="search_response_inclusion",
+                    help="web_search result visibility in code_execution: "
+                         "full (default) or excluded")
+    ws.add_argument("--fetch-no-cache", action="store_true",
+                    dest="fetch_no_cache",
+                    help="Force fresh web_fetch (bypass cached content)")
     ws.add_argument("--fetch-url", metavar="URL", dest="fetch_url")
 
     vi = p.add_argument_group("Vision")
@@ -197,6 +232,24 @@ def build_parser():
                          "so it had no effect either way — --cache always silently "
                          "printed stats and there was no way to turn that off)")
     ca.add_argument("--cache-docs", nargs="+", metavar="FILE", dest="cache_docs")
+    ca.add_argument("--cache-diagnose", action="store_true", dest="cache_diagnose",
+                    help="With --cache: opt into Cache diagnostics (beta) — report "
+                         "cache_miss_reason against this process's previous call. "
+                         "The client-side support for this (diagnose= on "
+                         "generate_cached()) has existed since v1.10.x, but no CLI "
+                         "flag ever set it, so it was unreachable from the CLI.")
+    ca.add_argument("--cache-multi-turn", nargs="+", metavar="TEXT", dest="cache_multi_turn",
+                    help="Run a multi-turn cached conversation instead of a single "
+                         "--cache call; each TEXT is one user turn.")
+    ca.add_argument("--cache-mid-system", default="", dest="cache_mid_system",
+                    help="With --cache-multi-turn: insert a mid-conversation system "
+                         "message (Opus 4.8 only) after the turn given by "
+                         "--cache-mid-system-after, without invalidating the cached "
+                         "prefix that came before it.")
+    ca.add_argument("--cache-mid-system-after", type=int, default=0,
+                    dest="cache_mid_system_after", metavar="N",
+                    help="0-based turn index to insert --cache-mid-system after "
+                         "(default: 0, i.e. right after the first turn).")
 
     tu = p.add_argument_group("Tool Use")
     tu.add_argument("--tool-agent", action="store_true", dest="tool_agent")
@@ -243,7 +296,7 @@ def build_parser():
                     help="Embed each line of FILE via Voyage AI")
     em.add_argument("--embed-similarity", nargs=2, metavar=("A", "B"), dest="embed_similarity",
                     help="Cosine similarity between two strings' embeddings")
-    em.add_argument("--embed-model", default="voyage-3.5", dest="embed_model")
+    em.add_argument("--embed-model", default="voyage-4", dest="embed_model")
     em.add_argument("--embed-input-type", default="document", choices=["document", "query"],
                     dest="embed_input_type")
 
@@ -290,9 +343,8 @@ def build_parser():
                          "--check-deprecated this actually edits files. Dry-run by default.")
     mo.add_argument("--upgrade-target", choices=sorted(UPGRADE_TARGETS), default="fable5",
                     dest="upgrade_target",
-                    help="Target for --upgrade-all: fable5 (claude-fable-5), opus "
-                         "(claude-opus-4-8), sonnet5 (claude-sonnet-5), haiku45 (claude-haiku-4-5-20251001), "
-                         "or mythos5 (claude-mythos-5). Default: fable5")
+                    help="Target for --upgrade-all: fable5 (claude-fable-5) or opus "
+                         "(claude-opus-4-8). Default: fable5")
     mo.add_argument("--upgrade-yes", action="store_true", dest="upgrade_yes",
                     help="With --upgrade-all: actually write changes (default is a dry-run preview)")
     mo.add_argument("--upgrade-no-backup", action="store_true", dest="upgrade_no_backup",
@@ -304,15 +356,118 @@ def build_parser():
     f5.add_argument("--fable5", metavar="PROMPT", dest="fable5",
                     help="Call Claude Fable 5 with refusal detection and automatic fallback")
     f5.add_argument("--fable5-no-fallback", action="store_true", dest="fable5_no_fallback",
-                    help="With --fable5: disable automatic fallback on refusal (just report it)")
+                    help="With --fable5: disable automatic fallback on refusal (just report it). "
+                         "Only affects the manual retry path; no effect if "
+                         "--fable5-fallback-chain is set.")
     f5.add_argument("--fallback-model", default="claude-opus-4-8", dest="fallback_model",
-                    help="Model to fall back to on refusal (default: claude-opus-4-8)")
+                    help="Manual-retry fallback model (default: claude-opus-4-8). "
+                         "No effect if --fable5-fallback-chain is set.")
+    f5.add_argument("--fable5-fallback-chain", metavar="MODEL1,MODEL2", dest="fable5_fallback_chain",
+                    help="Server-side fallback (beta `fallbacks` param): comma-separated "
+                         "models (up to 3 total including the primary) that the platform "
+                         "itself retries against, in order, in the same round trip if the "
+                         "primary refuses. Preferred over --fallback-model when available.")
 
     m5 = p.add_argument_group("Claude Mythos 5 (limited access)")
     m5.add_argument("--mythos5-info", action="store_true", dest="mythos5_info",
                     help="Show what's known about Mythos 5 access/pricing (approval-gated, see --fable5-info for the public sibling)")
     m5.add_argument("--mythos5", metavar="PROMPT", dest="mythos5",
                     help="Call Claude Mythos 5 directly (requires approved Project Glasswing access)")
+
+    ad = p.add_argument_group("Admin API (usage/cost reporting + API key management)")
+    ad.add_argument("--admin-api-key", metavar="KEY", dest="admin_api_key",
+                    help="Admin API key (sk-ant-admin...). Falls back to the "
+                         "ANTHROPIC_ADMIN_API_KEY env var if not given.")
+    ad.add_argument("--usage-report", action="store_true", dest="usage_report",
+                    help="Print an org usage/cost report (requires an Admin API key)")
+    ad.add_argument("--usage-report-start", metavar="DATE", dest="usage_report_start",
+                    help="Report start date, YYYY-MM-DD (default: 30 days ago)")
+    ad.add_argument("--usage-report-end", metavar="DATE", dest="usage_report_end",
+                    help="Report end date, YYYY-MM-DD (default: today)")
+    ad.add_argument("--usage-report-group-by", default="model", metavar="FIELD",
+                    dest="usage_report_group_by",
+                    help="Group usage report by field, e.g. model, api_key_id (default: model)")
+    ad.add_argument("--cost-report", action="store_true", dest="cost_report",
+                    help="Print an org cost report (billed spend, requires an Admin API key). "
+                         "Distinct from --usage-report, which reports token counts, not cost.")
+    ad.add_argument("--cost-report-start", metavar="DATE", dest="cost_report_start",
+                    help="Report start date, YYYY-MM-DD (default: 30 days ago)")
+    ad.add_argument("--cost-report-end", metavar="DATE", dest="cost_report_end",
+                    help="Report end date, YYYY-MM-DD (default: today)")
+    ad.add_argument("--cost-report-group-by", default="model", metavar="FIELD",
+                    dest="cost_report_group_by",
+                    help="Group cost report by field, e.g. model, api_key_id (default: model)")
+    ad.add_argument("--admin-list-keys", action="store_true", dest="admin_list_keys",
+                    help="List organization API keys (requires an Admin API key)")
+    ad.add_argument("--admin-revoke-key", metavar="ID", dest="admin_revoke_key",
+                    help="Revoke (deactivate) an organization API key by ID")
+    ad.add_argument("--admin-create-key", metavar="NAME", dest="admin_create_key",
+                    help="Explains why key creation isn't available via the API "
+                         "(Console-only by design) instead of silently failing")
+
+    cp = p.add_argument_group("Compliance API (Activity Feed + chats/files/projects + directory)")
+    cp.add_argument("--compliance-api-key", metavar="KEY", dest="compliance_api_key",
+                    help="Compliance Access Key (sk-ant-api01-...) or Admin API key "
+                         "(sk-ant-admin01-..., Activity Feed only). Falls back to "
+                         "ANTHROPIC_COMPLIANCE_API_KEY, then --admin-api-key/"
+                         "ANTHROPIC_ADMIN_API_KEY, if not given.")
+    cp.add_argument("--compliance-activities", action="store_true", dest="compliance_activities",
+                    help="Print recent Activity Feed entries")
+    cp.add_argument("--compliance-activities-since", metavar="DATETIME", dest="compliance_activities_since",
+                    help="created_at.gte filter, RFC 3339 (e.g. 2026-06-01T00:00:00Z)")
+    cp.add_argument("--compliance-activities-until", metavar="DATETIME", dest="compliance_activities_until",
+                    help="created_at.lte filter, RFC 3339")
+    cp.add_argument("--compliance-activity-types", metavar="T1,T2", dest="compliance_activity_types",
+                    help="Comma-separated activity_types[] filter, e.g. claude_chat_created,claude_file_uploaded")
+    cp.add_argument("--compliance-activities-limit", type=int, default=100, metavar="N",
+                    dest="compliance_activities_limit",
+                    help="Page size, 1-5000 (default: 100)")
+    cp.add_argument("--compliance-activities-all", action="store_true", dest="compliance_activities_all",
+                    help="Page through the entire matching feed instead of just one page")
+    cp.add_argument("--compliance-chats-list", action="store_true", dest="compliance_chats_list",
+                    help="List chats for --compliance-user-ids (Compliance Access Key required)")
+    cp.add_argument("--compliance-user-ids", metavar="ID1,ID2", dest="compliance_user_ids",
+                    help="Comma-separated user IDs, required with --compliance-chats-list (max 10)")
+    cp.add_argument("--compliance-chat-messages", metavar="CHAT_ID", dest="compliance_chat_messages",
+                    help="Print one chat's full message content")
+    cp.add_argument("--compliance-chat-delete", metavar="CHAT_ID", dest="compliance_chat_delete",
+                    help="Hard-delete a chat — permanent, needs --compliance-yes to actually run")
+    cp.add_argument("--compliance-file-download", metavar="FILE_ID", dest="compliance_file_download",
+                    help="Download a file's original bytes (use --compliance-output to set the path)")
+    cp.add_argument("--compliance-file-delete", metavar="FILE_ID", dest="compliance_file_delete",
+                    help="Hard-delete a file — permanent, needs --compliance-yes to actually run")
+    cp.add_argument("--compliance-projects-list", action="store_true", dest="compliance_projects_list",
+                    help="List projects")
+    cp.add_argument("--compliance-project-info", metavar="PROJECT_ID", dest="compliance_project_info",
+                    help="Show one project's details")
+    cp.add_argument("--compliance-project-attachments", metavar="PROJECT_ID",
+                    dest="compliance_project_attachments",
+                    help="List a project's attachments (files and documents)")
+    cp.add_argument("--compliance-project-delete", metavar="PROJECT_ID", dest="compliance_project_delete",
+                    help="Hard-delete a project — permanent, needs --compliance-yes; "
+                         "fails clearly if chats are still attached")
+    cp.add_argument("--compliance-orgs-list", action="store_true", dest="compliance_orgs_list",
+                    help="List every linked organization")
+    cp.add_argument("--compliance-org-users", metavar="ORG_UUID", dest="compliance_org_users",
+                    help="List an organization's users")
+    cp.add_argument("--compliance-org-roles", metavar="ORG_UUID", dest="compliance_org_roles",
+                    help="List an organization's RBAC roles")
+    cp.add_argument("--compliance-org-settings", metavar="ORG_UUID", dest="compliance_org_settings",
+                    help="Show the effective settings (retention, redaction, IP allowlist, ...) in force for an organization")
+    cp.add_argument("--compliance-groups-list", action="store_true", dest="compliance_groups_list",
+                    help="List RBAC/SCIM groups")
+    cp.add_argument("--compliance-group-members", metavar="GROUP_ID", dest="compliance_group_members",
+                    help="List a group's members")
+    cp.add_argument("--compliance-yes", action="store_true", dest="compliance_yes",
+                    help="Actually execute a --compliance-*-delete (default: dry-run preview only)")
+    cp.add_argument("--compliance-output", metavar="PATH", dest="compliance_output",
+                    help="Output path for --compliance-file-download (default: the original filename)")
+
+    sk = p.add_argument_group("Agent Skills API (platform, skill_id-based)")
+    sk.add_argument("--skills-list", action="store_true", dest="skills_list",
+                    help="List Anthropic-provided pre-built Skills (pptx/xlsx/docx/pdf)")
+    sk.add_argument("--skills-info", metavar="ID", dest="skills_info",
+                    help="Show details for one skill_id (info-only, no API call)")
 
     cu = p.add_argument_group("Computer Use")
     cu.add_argument("--computer-use", metavar="TASK", dest="computer_use")
@@ -323,8 +478,138 @@ def build_parser():
     ag.add_argument("--agent-managed-run", metavar="TASK", dest="agent_managed_run",
                     help="Run TASK on the real hosted Claude Managed Agents API "
                          "(creates a throwaway agent/environment/session)")
+    ag.add_argument("--agent-memory-store", metavar="NAME", dest="agent_memory_store",
+                    default="",
+                    help="With --agent-managed-run: create/reuse a persistent "
+                         "Managed Agents memory store NAME and mount it into the "
+                         "session (agent-memory-2026-07-22 beta, opt-in). Without "
+                         "--agent-managed-run: use with --agent-memory-store-create "
+                         "to create a standalone store.")
+    ag.add_argument("--agent-memory-store-create", action="store_true",
+                    dest="agent_memory_store_create",
+                    help="Create a Managed Agents memory store (named via "
+                         "--agent-memory-store) without also running a task")
     ag.add_argument("--agent-list-sessions", action="store_true", dest="agent_list_sessions")
     ag.add_argument("--list-tool-presets", action="store_true", dest="list_tool_presets")
+
+    ag.add_argument("--agent-dream", metavar="STORE_ID", dest="agent_dream",
+                    help="Run a Dreaming pass (research preview, dreaming-2026-04-21 "
+                         "beta) over memory store STORE_ID, producing a new curated "
+                         "output store. Async — returns a pending dream id.")
+    ag.add_argument("--agent-dream-sessions", metavar="IDS", dest="agent_dream_sessions",
+                    default="", help="Comma-separated session IDs to fold into "
+                         "--agent-dream, alongside the memory store")
+    ag.add_argument("--agent-dream-instructions", metavar="TEXT",
+                    dest="agent_dream_instructions", default="",
+                    help="Optional steering text for --agent-dream")
+    ag.add_argument("--agent-dream-list", action="store_true", dest="agent_dream_list",
+                    help="List non-archived dreams in the workspace")
+    ag.add_argument("--agent-dream-get", metavar="DREAM_ID", dest="agent_dream_get",
+                    help="Retrieve one dream's status and output_store_id")
+
+    ag.add_argument("--agent-outcome", metavar="DESC", dest="agent_outcome", default="",
+                    help="With --agent-managed-run: define an outcome (rubric-graded "
+                         "self-correction loop, public beta) instead of a plain task. "
+                         "Requires --agent-outcome-rubric.")
+    ag.add_argument("--agent-outcome-rubric", metavar="FILE", dest="agent_outcome_rubric",
+                    default="", help="Markdown rubric file for --agent-outcome")
+    ag.add_argument("--agent-outcome-max-iter", type=int, default=3,
+                    dest="agent_outcome_max_iter",
+                    help="max_iterations for --agent-outcome (default 3, max 20)")
+
+    ag.add_argument("--agent-webhook-register", metavar="URL", dest="agent_webhook_register",
+                    help="Register a webhook URL for Managed Agents session/outcome/"
+                         "dream events (public beta)")
+    ag.add_argument("--agent-webhook-events", metavar="LIST", dest="agent_webhook_events",
+                    default="", help="Comma-separated event types for "
+                         "--agent-webhook-register (default: all supported types)")
+
+    ag.add_argument("--agent-vault-create", metavar="NAME", dest="agent_vault_create",
+                    help="Create a vault (v1.21.0, public beta) for third-party "
+                         "credentials (MCP OAuth, static bearer, or env-var secrets)")
+    ag.add_argument("--agent-vault-external-user", metavar="ID",
+                    dest="agent_vault_external_user", default="",
+                    help="Optional external_user_id metadata for --agent-vault-create")
+    ag.add_argument("--agent-vault-add-credential", metavar="VAULT_ID",
+                    dest="agent_vault_add_credential",
+                    help="Add a credential to VAULT_ID")
+    ag.add_argument("--agent-vault-cred-type", metavar="TYPE",
+                    dest="agent_vault_cred_type", default="",
+                    choices=["mcp_oauth", "static_bearer", "environment_variable"],
+                    help="Credential type for --agent-vault-add-credential")
+    ag.add_argument("--agent-vault-mcp-url", metavar="URL", dest="agent_vault_mcp_url",
+                    default="", help="MCP server URL (mcp_oauth/static_bearer credentials)")
+    ag.add_argument("--agent-vault-secret-name", metavar="NAME",
+                    dest="agent_vault_secret_name", default="",
+                    help="Environment variable name (environment_variable credentials)")
+    ag.add_argument("--agent-vault-secret", metavar="VALUE", dest="agent_vault_secret",
+                    default="", help="The credential's secret value (write-only, never logged)")
+    ag.add_argument("--agent-vault-allowed-domains", metavar="LIST",
+                    dest="agent_vault_allowed_domains", default="",
+                    help="Comma-separated allow-listed domains (environment_variable credentials)")
+    ag.add_argument("--agent-vault-injection-location", metavar="LOC",
+                    dest="agent_vault_injection_location", default="headers",
+                    choices=["headers", "body", "both"],
+                    help="Secret injection location for environment_variable credentials "
+                         "(v1.22.0): headers, body, or both (default: headers)")
+    ag.add_argument("--agent-vault-list", action="store_true", dest="agent_vault_list",
+                    help="List vaults in the workspace")
+    ag.add_argument("--agent-vault", metavar="VAULT_ID", dest="agent_vault", default="",
+                    help="With --agent-managed-run: mount a vault's credentials into the session")
+
+    ag.add_argument("--agent-schedule-create", metavar="AGENT_ID",
+                    dest="agent_schedule_create",
+                    help="Attach a cron schedule (v1.21.0, public beta) to AGENT_ID")
+    ag.add_argument("--agent-schedule-env", metavar="ENV_ID", dest="agent_schedule_env",
+                    default="", help="Environment id (with --agent-schedule-create)")
+    ag.add_argument("--agent-schedule-cron", metavar="EXPR", dest="agent_schedule_cron",
+                    default="", help="Cron expression (with --agent-schedule-create)")
+    ag.add_argument("--agent-schedule-tz", metavar="TZ", dest="agent_schedule_tz",
+                    default="UTC", help="IANA timezone (with --agent-schedule-create, default UTC)")
+    ag.add_argument("--agent-schedule-task", metavar="TEXT", dest="agent_schedule_task",
+                    default="", help="Initial task text for the scheduled session")
+    ag.add_argument("--agent-schedule-list", action="store_true", dest="agent_schedule_list",
+                    help="List scheduled deployments")
+    ag.add_argument("--agent-schedule-cancel", metavar="DEPLOYMENT_ID",
+                    dest="agent_schedule_cancel", help="Archive a scheduled deployment")
+    ag.add_argument("--agent-deployment-runs", action="store_true",
+                    dest="agent_deployment_runs",
+                    help="List deployment runs (execution history for scheduled deployments)")
+    ag.add_argument("--agent-deployment-run-filter", metavar="DEPLOYMENT_ID",
+                    dest="agent_deployment_run_filter", default="",
+                    help="Filter --agent-deployment-runs by deployment ID")
+    ag.add_argument("--agent-deployment-run-id", metavar="RUN_ID",
+                    dest="agent_deployment_run_id", default="",
+                    help="Retrieve a specific deployment run")
+    ag.add_argument("--agent-deployment-run-errors", action="store_true",
+                    dest="agent_deployment_run_errors",
+                    help="Filter --agent-deployment-runs to error-only runs")
+    ag.add_argument("--agent-user-profile-list", action="store_true",
+                    dest="agent_user_profile_list",
+                    help="List user profiles for multi-tenant attribution")
+    ag.add_argument("--agent-user-profile-create", metavar="NAME",
+                    dest="agent_user_profile_create", default="",
+                    help="Create a user profile for multi-tenant billing")
+    ag.add_argument("--agent-user-profile-external-id", metavar="ID",
+                    dest="agent_user_profile_external_id", default="",
+                    help="External ID (with --agent-user-profile-create)")
+
+    ag.add_argument("--agent-review-multiagent", metavar="PATH",
+                    dest="agent_review_multiagent",
+                    help="Native Multiagent orchestration (v1.21.0): parallel specialist "
+                         "code review of PATH over one shared sandbox")
+    ag.add_argument("--agent-review-specialists", metavar="LIST",
+                    dest="agent_review_specialists", default="security,style,test-coverage",
+                    help="Comma-separated specialists for --agent-review-multiagent "
+                         "(security, style, test-coverage)")
+
+    ag.add_argument("--agent-outcome-rubric-upload", metavar="FILE",
+                    dest="agent_outcome_rubric_upload",
+                    help="Upload a rubric once via the Files API and print its file_id (v1.21.0)")
+    ag.add_argument("--agent-outcome-rubric-file", metavar="FILE_ID",
+                    dest="agent_outcome_rubric_file", default="",
+                    help="Reuse an uploaded rubric's file_id with --agent-outcome, "
+                         "instead of --agent-outcome-rubric FILE")
 
     cw = p.add_argument_group("Cowork")
     cw.add_argument("--cowork", metavar="TYPE")
@@ -334,6 +619,52 @@ def build_parser():
     cw.add_argument("--cowork-format", default="markdown", dest="cowork_format",
                     choices=["markdown","json","outline","bullets"])
     cw.add_argument("--cowork-list", action="store_true", dest="cowork_list")
+
+    xl = p.add_argument_group("Excel / Data Chat")
+    xl.add_argument("--excel", nargs="?", const="", metavar="FILE", dest="excel",
+                    help="Start a conversational spreadsheet session — build financial "
+                         "models, clean messy data, and create tables and charts, applied "
+                         "directly to a live .xlsx workbook. Optionally load an existing "
+                         ".xlsx/.csv as the starting data.")
+    xl.add_argument("--excel-output", metavar="FILE", dest="excel_output",
+                    help="Workbook path to write after every turn "
+                         "(default: <input>.xlsx or excel_session.xlsx)")
+    xl.add_argument("--excel-sheet", metavar="NAME", dest="excel_sheet",
+                    help="Which sheet to load from a multi-sheet --excel input file")
+    xl.add_argument("--excel-native", action="store_true", dest="excel_native",
+                    help="Route --excel through Anthropic's own xlsx Skill (server-side, "
+                         "code-execution container) instead of the built-in pandas/openpyxl "
+                         "path. Requires Skills access on the account; no local pandas/"
+                         "openpyxl dependency needed for this mode. Falls back to the "
+                         "regular --excel path's behavior if omitted.")
+
+    pp = p.add_argument_group("PowerPoint / Slide Chat")
+    pp.add_argument("--pptx", nargs="?", const="", metavar="FILE", dest="pptx",
+                    help="Start a conversational slide-deck session — add/edit slides, "
+                         "tables, and charts, applied directly to a live .pptx deck. "
+                         "Optionally load an existing .pptx as the starting deck.")
+    pp.add_argument("--pptx-output", metavar="FILE", dest="pptx_output",
+                    help="Deck path to write after every turn "
+                         "(default: <input>.pptx or pptx_session.pptx)")
+    pp.add_argument("--pptx-native", action="store_true", dest="pptx_native",
+                    help="Route --pptx through Anthropic's own pptx Skill (server-side, "
+                         "code-execution container) instead of the built-in python-pptx "
+                         "path. Requires Skills access on the account; no local python-pptx "
+                         "dependency needed for this mode. Falls back to the regular --pptx "
+                         "path's behavior if omitted.")
+
+    br = p.add_argument_group("Browse (Claude in Chrome analog)")
+    br.add_argument("--browse", metavar="URL", dest="browse",
+                    help="Start a headless browsing-agent session at URL. Not the "
+                         "Claude in Chrome extension — a fetch/decide/navigate loop for "
+                         "CLI and CI use. Requires --browse-task.")
+    br.add_argument("--browse-task", metavar="TEXT", dest="browse_task",
+                    help="What to find or do, required with --browse")
+    br.add_argument("--browse-max-steps", type=int, default=6, dest="browse_max_steps",
+                    help="Max fetch/decide iterations (default: 6)")
+    br.add_argument("--browse-allow-domain", action="append", default=None,
+                    dest="browse_allow_domains", metavar="DOMAIN",
+                    help="Restrict navigation to this domain (repeatable)")
 
     # Claude Code
     cc = p.add_argument_group("Claude Code")
@@ -382,6 +713,12 @@ def build_parser():
     cc.add_argument("--code-agent-sandbox-roots", nargs="+", metavar="PATH",
                     dest="code_agent_sandbox_roots",
                     help="Extra filesystem roots the sandbox may read/write besides cwd")
+    cc.add_argument("--agent-context-editing", action="store_true",
+                    dest="agent_context_editing",
+                    help="Opt-in context editing (clear_tool_uses) for this agent loop, "
+                         "complementary to Compaction — clearing drops stale tool results, "
+                         "Compaction summarizes the whole conversation. Useful for long "
+                         "--code-agent sessions.")
 
     pl = p.add_argument_group("Plugins & Marketplaces")
     pl.add_argument("--plugin-marketplace-add", metavar="PATH_OR_URL",
@@ -495,15 +832,26 @@ def build_parser():
 
 
 def main():
+    from logging_config import setup_logging, new_correlation_id
+    setup_logging()
+    new_correlation_id()
+
     parser = build_parser()
     args   = parser.parse_args()
 
     if args.version:
         print(BANNER); return
 
+    if getattr(args, "health_check", False):
+        import json as _json
+        from health import run_health_check
+        report = run_health_check(deep=getattr(args, "health_check_deep", False))
+        print(_json.dumps(report.to_dict(), indent=2))
+        sys.exit(0 if report.healthy else 1)
+
     # ── No-key listing ──
     if args.list_skills:
-        from core.skills import SkillManager
+        from skills import SkillManager
         for s in SkillManager().list_skills():
             print(f"  {s['name']:<25} — {s['description']}")
         return
@@ -515,90 +863,207 @@ def main():
             print(f"  {n:<25} — {sys_prompt}")
         return
     if args.list_personalities:
-        from core.personalities import PersonalityManager
+        from personalities import PersonalityManager
         for p_ in PersonalityManager().list_personalities():
             print(f"  {p_['name']:<12} — {p_['description']}")
         return
 
     # ── Plugins & Marketplaces (no API key required) ──
     if args.plugin_marketplace_add:
-        from core.claude_plugins import cmd_plugin_marketplace_add
+        from claude_plugins import cmd_plugin_marketplace_add
         cmd_plugin_marketplace_add(args.plugin_marketplace_add, args.plugin_marketplace_name); return
     if args.plugin_marketplace_list:
-        from core.claude_plugins import cmd_plugin_marketplace_list
+        from claude_plugins import cmd_plugin_marketplace_list
         cmd_plugin_marketplace_list(); return
     if args.plugin_marketplace_remove:
-        from core.claude_plugins import cmd_plugin_marketplace_remove
+        from claude_plugins import cmd_plugin_marketplace_remove
         cmd_plugin_marketplace_remove(args.plugin_marketplace_remove); return
     if args.plugin_install:
-        from core.claude_plugins import cmd_plugin_install
+        from claude_plugins import cmd_plugin_install
         cmd_plugin_install(args.plugin_install); return
     if args.plugin_dir:
-        from core.claude_plugins import cmd_plugin_install_dir
+        from claude_plugins import cmd_plugin_install_dir
         cmd_plugin_install_dir(args.plugin_dir); return
     if args.plugin_uninstall:
-        from core.claude_plugins import cmd_plugin_uninstall
+        from claude_plugins import cmd_plugin_uninstall
         cmd_plugin_uninstall(args.plugin_uninstall); return
     if args.plugin_list:
-        from core.claude_plugins import cmd_plugin_list
+        from claude_plugins import cmd_plugin_list
         cmd_plugin_list(); return
     if args.plugin_info:
-        from core.claude_plugins import cmd_plugin_info
+        from claude_plugins import cmd_plugin_info
         cmd_plugin_info(args.plugin_info); return
     if args.plugin_enable:
-        from core.claude_plugins import cmd_plugin_enable
+        from claude_plugins import cmd_plugin_enable
         cmd_plugin_enable(args.plugin_enable); return
     if args.plugin_disable:
-        from core.claude_plugins import cmd_plugin_disable
+        from claude_plugins import cmd_plugin_disable
         cmd_plugin_disable(args.plugin_disable); return
     if args.plugin_validate:
-        from core.claude_plugins import cmd_plugin_validate
+        from claude_plugins import cmd_plugin_validate
         cmd_plugin_validate(args.plugin_validate); return
 
     # ── Settings (no API key required) ──
     if args.settings_show:
-        from core.claude_settings import cmd_settings_show
+        from claude_settings import cmd_settings_show
         cmd_settings_show(); return
     if args.status_line:
-        from core.claude_settings import cmd_status_line
+        from claude_settings import cmd_status_line
         cmd_status_line(model=args.model or "claude-sonnet-5", cwd=args.code_agent_cwd); return
     if args.list_output_styles:
-        from core.claude_output_styles import cmd_list_output_styles
+        from claude_output_styles import cmd_list_output_styles
         cmd_list_output_styles(); return
 
     if args.fable5_info:
-        from agents.claude_fable5 import cmd_fable5_info
+        from claude_fable5 import cmd_fable5_info
         cmd_fable5_info(); return
 
     if args.mythos5_info:
-        from agents.claude_mythos5 import cmd_mythos5_info
+        from claude_mythos5 import cmd_mythos5_info
         cmd_mythos5_info(); return
 
+    if args.skills_list:
+        from claude_skills_api import cmd_skills_list
+        cmd_skills_list(); return
+    if args.skills_info:
+        from claude_skills_api import cmd_skills_info
+        cmd_skills_info(args.skills_info); return
+
+    if (args.usage_report or args.cost_report or args.admin_list_keys
+            or args.admin_revoke_key or args.admin_create_key):
+        admin_key = args.admin_api_key or os.environ.get("ANTHROPIC_ADMIN_API_KEY")
+        if args.admin_create_key:
+            from claude_admin_api import cmd_admin_create_key
+            cmd_admin_create_key(args.admin_create_key); return
+        if not admin_key:
+            print("[ERROR] This requires an Admin API key: pass --admin-api-key or set "
+                 "ANTHROPIC_ADMIN_API_KEY", file=sys.stderr)
+            sys.exit(1)
+        if args.usage_report:
+            from claude_admin_api import cmd_usage_report
+            cmd_usage_report(admin_key, start=args.usage_report_start,
+                             end=args.usage_report_end,
+                             group_by=args.usage_report_group_by); return
+        if args.cost_report:
+            from claude_admin_api import cmd_cost_report
+            cmd_cost_report(admin_key, start=args.cost_report_start,
+                            end=args.cost_report_end,
+                            group_by=args.cost_report_group_by); return
+        if args.admin_list_keys:
+            from claude_admin_api import cmd_admin_list_keys
+            cmd_admin_list_keys(admin_key); return
+        if args.admin_revoke_key:
+            from claude_admin_api import cmd_admin_revoke_key
+            cmd_admin_revoke_key(admin_key, args.admin_revoke_key); return
+
+    _compliance_flags = (
+        args.compliance_activities, args.compliance_chats_list, args.compliance_chat_messages,
+        args.compliance_chat_delete, args.compliance_file_download, args.compliance_file_delete,
+        args.compliance_projects_list, args.compliance_project_info,
+        args.compliance_project_attachments, args.compliance_project_delete,
+        args.compliance_orgs_list, args.compliance_org_users, args.compliance_org_roles,
+        args.compliance_org_settings, args.compliance_groups_list, args.compliance_group_members,
+    )
+    if any(_compliance_flags):
+        compliance_key = (args.compliance_api_key
+                          or os.environ.get("ANTHROPIC_COMPLIANCE_API_KEY")
+                          or args.admin_api_key
+                          or os.environ.get("ANTHROPIC_ADMIN_API_KEY"))
+        if not compliance_key:
+            print("[ERROR] This requires a Compliance Access Key or Admin API key: pass "
+                 "--compliance-api-key or set ANTHROPIC_COMPLIANCE_API_KEY (or "
+                 "--admin-api-key / ANTHROPIC_ADMIN_API_KEY for Activity-Feed-only access)",
+                 file=sys.stderr)
+            sys.exit(1)
+        activity_types = (args.compliance_activity_types.split(",")
+                          if args.compliance_activity_types else None)
+        user_ids = args.compliance_user_ids.split(",") if args.compliance_user_ids else None
+
+        if args.compliance_activities:
+            from claude_compliance_api import cmd_compliance_activities
+            cmd_compliance_activities(compliance_key, since=args.compliance_activities_since,
+                                      until=args.compliance_activities_until,
+                                      activity_types=activity_types,
+                                      limit=args.compliance_activities_limit,
+                                      all_pages=args.compliance_activities_all); return
+        if args.compliance_chats_list:
+            from claude_compliance_api import cmd_compliance_chats_list
+            if not user_ids:
+                print("[ERROR] --compliance-chats-list requires --compliance-user-ids", file=sys.stderr)
+                sys.exit(1)
+            cmd_compliance_chats_list(compliance_key, user_ids); return
+        if args.compliance_chat_messages:
+            from claude_compliance_api import cmd_compliance_chat_messages
+            cmd_compliance_chat_messages(compliance_key, args.compliance_chat_messages); return
+        if args.compliance_chat_delete:
+            from claude_compliance_api import cmd_compliance_chat_delete
+            cmd_compliance_chat_delete(compliance_key, args.compliance_chat_delete,
+                                       yes=args.compliance_yes); return
+        if args.compliance_file_download:
+            from claude_compliance_api import cmd_compliance_file_download
+            cmd_compliance_file_download(compliance_key, args.compliance_file_download,
+                                         output_path=args.compliance_output); return
+        if args.compliance_file_delete:
+            from claude_compliance_api import cmd_compliance_file_delete
+            cmd_compliance_file_delete(compliance_key, args.compliance_file_delete,
+                                       yes=args.compliance_yes); return
+        if args.compliance_projects_list:
+            from claude_compliance_api import cmd_compliance_projects_list
+            cmd_compliance_projects_list(compliance_key); return
+        if args.compliance_project_info:
+            from claude_compliance_api import cmd_compliance_project_info
+            cmd_compliance_project_info(compliance_key, args.compliance_project_info); return
+        if args.compliance_project_attachments:
+            from claude_compliance_api import cmd_compliance_project_attachments
+            cmd_compliance_project_attachments(compliance_key, args.compliance_project_attachments); return
+        if args.compliance_project_delete:
+            from claude_compliance_api import cmd_compliance_project_delete
+            cmd_compliance_project_delete(compliance_key, args.compliance_project_delete,
+                                          yes=args.compliance_yes); return
+        if args.compliance_orgs_list:
+            from claude_compliance_api import cmd_compliance_orgs_list
+            cmd_compliance_orgs_list(compliance_key); return
+        if args.compliance_org_users:
+            from claude_compliance_api import cmd_compliance_org_users
+            cmd_compliance_org_users(compliance_key, args.compliance_org_users); return
+        if args.compliance_org_roles:
+            from claude_compliance_api import cmd_compliance_org_roles
+            cmd_compliance_org_roles(compliance_key, args.compliance_org_roles); return
+        if args.compliance_org_settings:
+            from claude_compliance_api import cmd_compliance_org_settings
+            cmd_compliance_org_settings(compliance_key, args.compliance_org_settings); return
+        if args.compliance_groups_list:
+            from claude_compliance_api import cmd_compliance_groups_list
+            cmd_compliance_groups_list(compliance_key); return
+        if args.compliance_group_members:
+            from claude_compliance_api import cmd_compliance_group_members
+            cmd_compliance_group_members(compliance_key, args.compliance_group_members); return
+
     if args.check_deprecated:
-        from api.claude_models import cmd_check_deprecated
+        from claude_models import cmd_check_deprecated
         cmd_check_deprecated(args.check_deprecated); return
     if args.upgrade_all:
-        from api.claude_models import cmd_upgrade_all
+        from claude_models import cmd_upgrade_all
         cmd_upgrade_all(args.upgrade_all, target=args.upgrade_target,
                         apply=args.upgrade_yes, no_backup=args.upgrade_no_backup); return
 
     if args.project_list:
-        from core.projects import cmd_project_list; cmd_project_list(); return
+        from projects import cmd_project_list; cmd_project_list(); return
     if args.project_templates:
-        from core.projects import cmd_project_templates; cmd_project_templates(); return
+        from projects import cmd_project_templates; cmd_project_templates(); return
     if args.project_show:
-        from core.projects import cmd_project_show; cmd_project_show(args.project_show); return
+        from projects import cmd_project_show; cmd_project_show(args.project_show); return
     if args.project_delete:
-        from core.projects import ProjectManager; ProjectManager().delete_project(args.project_delete)
+        from projects import ProjectManager; ProjectManager().delete_project(args.project_delete)
         print("✓ Deleted."); return
     if args.project_archive:
-        from core.projects import ProjectManager; ProjectManager().archive_project(args.project_archive)
+        from projects import ProjectManager; ProjectManager().archive_project(args.project_archive)
         print("✓ Archived."); return
     if args.project_create:
-        from core.projects import cmd_project_create
+        from projects import cmd_project_create
         cmd_project_create(args.project_create, args.project_desc, args.project_template); return
     if args.project_add_task:
-        from core.projects import cmd_project_add_task
+        from projects import cmd_project_add_task
         cmd_project_add_task(args.project_add_task, args.task_title or args.prompt or "",
                              args.task_desc, args.task_agent, args.task_priority); return
     if args.artifact_types:
@@ -628,94 +1093,129 @@ def main():
         from artifacts import cmd_artifact_attach
         cmd_artifact_attach(args.artifact_attach, args.to_project); return
     if args.list_server_tools:
-        from core.claude_tools import cmd_list_server_tools; cmd_list_server_tools(); return
+        from claude_tools import cmd_list_server_tools; cmd_list_server_tools(); return
     if args.cowork_list:
-        from agents.cowork import cmd_cowork_list; cmd_cowork_list(); return
+        from cowork import cmd_cowork_list; cmd_cowork_list(); return
     if args.agent_list_sessions:
-        from agents.claude_agents_sdk import cmd_agent_list_sessions; cmd_agent_list_sessions(); return
+        from claude_agents_sdk import cmd_agent_list_sessions; cmd_agent_list_sessions(); return
     if args.list_tool_presets:
-        from agents.claude_agents_sdk import cmd_list_tool_presets; cmd_list_tool_presets(); return
+        from claude_agents_sdk import cmd_list_tool_presets; cmd_list_tool_presets(); return
     if args.code_agent_list_sessions:
-        from core.claude_code import cmd_code_list_sessions; cmd_code_list_sessions(); return
+        from claude_code import cmd_code_list_sessions; cmd_code_list_sessions(); return
     if args.code_agent_list_tools:
-        from core.claude_code import cmd_code_list_tools; cmd_code_list_tools(); return
+        from claude_code import cmd_code_list_tools; cmd_code_list_tools(); return
 
     # ── New in v1.10.0 — no API key required ──
     if args.memory_add:
-        from core.claude_memory import cmd_memory_add
+        from claude_memory import cmd_memory_add
         cmd_memory_add(args.memory_add, args.memory_type, args.memory_tags,
                        args.memory_importance, args.memory_ns); return
     if args.memory_recall:
-        from core.claude_memory import cmd_memory_recall
+        from claude_memory import cmd_memory_recall
         cmd_memory_recall(args.memory_recall, args.memory_ns); return
     if args.memory_forget:
-        from core.claude_memory import cmd_memory_forget
+        from claude_memory import cmd_memory_forget
         cmd_memory_forget(args.memory_forget, args.memory_ns); return
     if args.memory_stats:
-        from core.claude_memory import cmd_memory_stats; cmd_memory_stats(args.memory_ns); return
+        from claude_memory import cmd_memory_stats; cmd_memory_stats(args.memory_ns); return
     if args.memory_retention:
-        from core.claude_memory import cmd_memory_retention; cmd_memory_retention(args.memory_ns); return
+        from claude_memory import cmd_memory_retention; cmd_memory_retention(args.memory_ns); return
     if args.sessions_list:
-        from agents.claude_sessions import cmd_sessions_list; cmd_sessions_list(); return
+        from claude_sessions import cmd_sessions_list; cmd_sessions_list(); return
     if args.session_show:
-        from agents.claude_sessions import cmd_session_show; cmd_session_show(args.session_show); return
+        from claude_sessions import cmd_session_show; cmd_session_show(args.session_show); return
     if args.checkpoint_list:
-        from agents.claude_sessions import cmd_checkpoint_list; cmd_checkpoint_list(args.checkpoint_list); return
+        from claude_sessions import cmd_checkpoint_list; cmd_checkpoint_list(args.checkpoint_list); return
     if args.away_summary:
-        from agents.claude_sessions import cmd_away_summary; cmd_away_summary(args.away_summary); return
+        from claude_sessions import cmd_away_summary; cmd_away_summary(args.away_summary); return
     if args.rag_index and args.rag_folder:
-        from agents.claude_rag import cmd_rag_index; cmd_rag_index(args.rag_index, args.rag_folder); return
+        from claude_rag import cmd_rag_index; cmd_rag_index(args.rag_index, args.rag_folder); return
     if args.rag_list:
-        from agents.claude_rag import cmd_rag_list; cmd_rag_list(); return
+        from claude_rag import cmd_rag_list; cmd_rag_list(); return
     if args.eval_list:
-        from agents.claude_eval import cmd_eval_list; cmd_eval_list(); return
+        from claude_eval import cmd_eval_list; cmd_eval_list(); return
     if args.eval_scaffold:
-        from agents.claude_eval import cmd_eval_scaffold; cmd_eval_scaffold(args.eval_scaffold); return
+        from claude_eval import cmd_eval_scaffold; cmd_eval_scaffold(args.eval_scaffold); return
     if args.cost_summary:
-        from utils.claude_cost_optimizer import cmd_cost_summary; cmd_cost_summary(); return
+        from claude_cost_optimizer import cmd_cost_summary; cmd_cost_summary(); return
     if args.cost_reset:
-        from utils.claude_cost_optimizer import cmd_cost_reset; cmd_cost_reset(); return
+        from claude_cost_optimizer import cmd_cost_reset; cmd_cost_reset(); return
     if args.obs_latency:
-        from utils.claude_observability import cmd_obs_latency; cmd_obs_latency(args.obs_hours); return
+        from claude_observability import cmd_obs_latency; cmd_obs_latency(args.obs_hours); return
     if args.obs_tail is not None:
-        from utils.claude_observability import cmd_obs_tail; cmd_obs_tail(args.obs_tail); return
+        from claude_observability import cmd_obs_tail; cmd_obs_tail(args.obs_tail); return
     if args.obs_clear:
-        from utils.claude_observability import cmd_obs_clear; cmd_obs_clear(); return
+        from claude_observability import cmd_obs_clear; cmd_obs_clear(); return
     if args.workflow_scaffold:
-        from agents.claude_workflow import cmd_workflow_scaffold; cmd_workflow_scaffold(args.workflow_scaffold); return
+        from claude_workflow import cmd_workflow_scaffold; cmd_workflow_scaffold(args.workflow_scaffold); return
     if args.hooks_add:
-        from core.claude_hooks_perms_plan import cmd_hooks_add
+        from claude_hooks_perms_plan import cmd_hooks_add
         cmd_hooks_add(args.hooks_add[0], args.hooks_add[1], args.hook_tool_match); return
     if args.hooks_list:
-        from core.claude_hooks_perms_plan import cmd_hooks_list; cmd_hooks_list(); return
+        from claude_hooks_perms_plan import cmd_hooks_list; cmd_hooks_list(); return
     if args.hooks_remove is not None:
-        from core.claude_hooks_perms_plan import cmd_hooks_remove; cmd_hooks_remove(args.hooks_remove); return
+        from claude_hooks_perms_plan import cmd_hooks_remove; cmd_hooks_remove(args.hooks_remove); return
     if args.perms_list:
-        from core.claude_hooks_perms_plan import cmd_perms_list; cmd_perms_list(); return
+        from claude_hooks_perms_plan import cmd_perms_list; cmd_perms_list(); return
     if args.perms_add:
-        from core.claude_hooks_perms_plan import cmd_perms_add
+        from claude_hooks_perms_plan import cmd_perms_add
         cmd_perms_add(args.perms_add[0], args.perms_add[1], args.perms_reason); return
 
     # ── API key required ──
     key   = _api_key(args)
     model = _model(args)
 
+    if args.interactive:
+        from claude_interactive import cmd_interactive
+        cmd_interactive(key, model, system=args.interactive_system,
+                        temperature=args.temperature, max_tokens=args.max_tokens,
+                        personality_style=args.personality); return
+
+    if args.excel is not None:
+        from claude_excel import cmd_excel_chat
+        cmd_excel_chat(key, model, input_path=args.excel or None,
+                       output_path=args.excel_output, sheet_name=args.excel_sheet,
+                       temperature=args.temperature, max_tokens=args.max_tokens,
+                       native=args.excel_native); return
+
+    if args.pptx is not None:
+        from claude_powerpoint import cmd_pptx_chat
+        cmd_pptx_chat(key, model, input_path=args.pptx or None,
+                      output_path=args.pptx_output,
+                      temperature=args.temperature, max_tokens=args.max_tokens,
+                      native=args.pptx_native); return
+
+    if args.browse:
+        if not args.browse_task:
+            print("[ERROR] --browse requires --browse-task", file=sys.stderr)
+            sys.exit(1)
+        from claude_chrome import cmd_browse
+        cmd_browse(key, model, args.browse, args.browse_task,
+                  max_steps=args.browse_max_steps,
+                  allowed_domains=args.browse_allow_domains,
+                  temperature=args.temperature, max_tokens=args.max_tokens); return
+
     if args.list_models:
-        from api.claude_models import cmd_list_models
+        from claude_models import cmd_list_models
         cmd_list_models(key, include_legacy=getattr(args, "list_models_legacy", False)); return
     if args.model_info:
-        from api.claude_models import cmd_model_info; cmd_model_info(args.model_info, key); return
+        from claude_models import cmd_model_info; cmd_model_info(args.model_info, key); return
     if args.fable5:
-        from agents.claude_fable5 import cmd_fable5_call
+        from claude_fable5 import cmd_fable5_call, parse_fallback_chain
+        try:
+            chain = parse_fallback_chain(getattr(args, "fable5_fallback_chain", None))
+        except ValueError as e:
+            print(f"[ERROR] {e}", file=sys.stderr); sys.exit(1)
         cmd_fable5_call(args.fable5, key, fallback_model=args.fallback_model,
-                        allow_fallback=not args.fable5_no_fallback); return
+                        allow_fallback=not args.fable5_no_fallback,
+                        fallback_chain=chain); return
     if args.mythos5:
-        from agents.claude_mythos5 import cmd_mythos5_call
+        from claude_mythos5 import cmd_mythos5_call
         cmd_mythos5_call(args.mythos5, key); return
 
     # ── zai-live ──
     if args.live:
-        from agents.claude_live import cmd_live
+        from claude_live import cmd_live
         # --temperature was accepted by the parser but never reached cmd_live,
         # so live mode always used LiveSession's 0.7 default regardless of the
         # flag. Now threaded through (still safely dropped by sampling_kwargs()
@@ -724,132 +1224,143 @@ def main():
 
     # ── Deep Research ──
     if args.research:
-        from agents.claude_research import cmd_research
+        from claude_research import cmd_research
         cmd_research(args.research, key, model, depth=args.research_depth,
                      source_urls=args.research_urls, output=args.output); return
 
     # ── RAG (query needs the key for generation; index/list handled above) ──
     if args.rag_query:
-        from agents.claude_rag import cmd_rag_query
+        from claude_rag import cmd_rag_query
         cmd_rag_query(args.rag_index_name, args.rag_query, key, model, k=args.rag_k); return
 
     # ── Evaluation (run/compare call the model; list/scaffold handled above) ──
     if args.eval_run:
-        from agents.claude_eval import cmd_eval_run
+        from claude_eval import cmd_eval_run
         cmd_eval_run(args.eval_run, key, model, threshold=args.eval_threshold, output=args.output); return
     if args.eval_compare:
-        from agents.claude_eval import cmd_eval_compare
+        from claude_eval import cmd_eval_compare
         cmd_eval_compare(args.eval_run or args.eval_scaffold or "", args.eval_compare[0],
                          args.eval_compare[1], key); return
 
     # ── Git Integration ──
     if args.git_commit:
-        from agents.claude_git import cmd_git_commit
+        from claude_git import cmd_git_commit
         cmd_git_commit(key, model, style=args.git_commit_style, write=args.git_commit_write); return
     if args.git_pr:
-        from agents.claude_git import cmd_git_pr; cmd_git_pr(args.git_pr[0], args.git_pr[1], key, model); return
+        from claude_git import cmd_git_pr; cmd_git_pr(args.git_pr[0], args.git_pr[1], key, model); return
     if args.git_changelog:
-        from agents.claude_git import cmd_git_changelog
+        from claude_git import cmd_git_changelog
         cmd_git_changelog(args.git_changelog, key, model, output=args.output); return
     if args.git_review:
-        from agents.claude_git import cmd_git_review; cmd_git_review(key, model); return
+        from claude_git import cmd_git_review; cmd_git_review(key, model); return
     if args.git_blame_explain:
-        from agents.claude_git import cmd_git_blame_explain
+        from claude_git import cmd_git_blame_explain
         f, s, e = args.git_blame_explain
         cmd_git_blame_explain(f, int(s), int(e), key, model); return
 
     # ── Cost Optimizer (optimized calls the model; summary/reset handled above) ──
     if args.optimized:
-        from utils.claude_cost_optimizer import cmd_optimized
+        from claude_cost_optimizer import cmd_optimized
         cmd_optimized(args.optimized, key, verbose=True, force_model=args.force_model); return
 
     # ── Observability (errors needs the model for analysis; rest handled above) ──
     if args.obs_errors:
-        from utils.claude_observability import cmd_obs_errors; cmd_obs_errors(key, model, args.obs_hours); return
+        from claude_observability import cmd_obs_errors; cmd_obs_errors(key, model, args.obs_hours); return
 
     # ── Workflows (run calls the model; scaffold handled above) ──
     if args.workflow_run:
-        from agents.claude_workflow import cmd_workflow_run
+        from claude_workflow import cmd_workflow_run
         cmd_workflow_run(args.workflow_run, key, input_text=args.workflow_input, output=args.output); return
 
     # ── Plan Mode ──
     if args.plan:
-        from core.claude_hooks_perms_plan import cmd_plan
+        from claude_hooks_perms_plan import cmd_plan
         cmd_plan(args.plan, key, model, context=args.plan_context,
                 execute=args.plan_execute, output=args.output); return
 
     if args.thinking or args.adaptive:
-        from core.claude_thinking import cmd_thinking
+        from claude_thinking import cmd_thinking
         prompt = args.prompt or (args.file and _read_file(args.file)) or ""
         cmd_thinking(prompt=prompt, api_key=key, model=model,
                      budget=args.thinking_budget, effort=args.effort or None,
                      adaptive=args.adaptive, show_thinking=args.show_thinking,
-                     stream=args.stream); return
+                     stream=args.stream, display=args.thinking_display,
+                     allow_manual=args.thinking_allow_manual); return
     if args.stream:
-        from api.claude_stream import cmd_stream
+        from claude_stream import cmd_stream
         cmd_stream(args.prompt or "", key, model,
                    file_content=_read_file(args.file) if args.file else None,
                    show_thinking=args.show_thinking); return
     if args.web_search or args.web_fetch:
-        from api.claude_search import cmd_web_search
+        from claude_search import cmd_web_search
         cmd_web_search(args.prompt or "", key, model,
                        max_searches=args.max_searches,
                        show_citations=not args.no_citations,
-                       web_fetch=args.web_fetch); return
+                       web_fetch=args.web_fetch,
+                       search_response_inclusion=args.search_response_inclusion,
+                       fetch_use_cache=not args.fetch_no_cache if args.fetch_no_cache else None); return
     if args.fetch_url:
-        from api.claude_search import cmd_fetch_url
+        from claude_search import cmd_fetch_url
         cmd_fetch_url(args.fetch_url, args.prompt or "", key, model); return
     if args.vision:
-        from api.claude_vision import cmd_vision
+        from claude_vision import cmd_vision
         cmd_vision(args.vision, args.prompt or "", key, model,
                    is_code=args.vision_code, language=args.vision_lang); return
     if args.vision_pdf:
-        from api.claude_vision import cmd_vision_pdf
+        from claude_vision import cmd_vision_pdf
         cmd_vision_pdf(args.vision_pdf, args.prompt or "", key, model); return
     if args.vision_url:
-        from api.claude_vision import cmd_vision_url
+        from claude_vision import cmd_vision_url
         cmd_vision_url(args.vision_url, args.prompt or "", key, model); return
     if args.vision_compare:
-        from api.claude_vision import cmd_vision_compare
+        from claude_vision import cmd_vision_compare
         cmd_vision_compare(args.vision_compare, args.prompt or "", key, model); return
     if args.vision_ocr:
-        from api.claude_vision import cmd_vision_ocr
+        from claude_vision import cmd_vision_ocr
         cmd_vision_ocr(args.vision_ocr, key, model); return
     if args.batch_submit:
-        from api.claude_batch import cmd_batch_submit
+        from claude_batch import cmd_batch_submit
         cmd_batch_submit(args.batch_submit, key, model,
                          use_300k_output=args.batch_300k_output); return
     if args.batch_status:
-        from api.claude_batch import cmd_batch_status
+        from claude_batch import cmd_batch_status
         cmd_batch_status(args.batch_status, key); return
     if args.batch_results:
-        from api.claude_batch import cmd_batch_results
+        from claude_batch import cmd_batch_results
         cmd_batch_results(args.batch_results, key, save_to=args.output or None); return
     if args.batch_cancel:
-        from api.claude_batch import cmd_batch_cancel
+        from claude_batch import cmd_batch_cancel
         cmd_batch_cancel(args.batch_cancel, key); return
     if args.batch_list:
-        from api.claude_batch import cmd_batch_list; cmd_batch_list(key); return
+        from claude_batch import cmd_batch_list; cmd_batch_list(key); return
     if args.batch_generate > 0:
-        from api.claude_batch import cmd_batch_generate
+        from claude_batch import cmd_batch_generate
         cmd_batch_generate(args.prompt or "", args.batch_generate, key, model,
                            wait=args.batch_wait); return
     if args.cache_warm:
-        from api.claude_cache import cmd_cache_warm
+        from claude_cache import cmd_cache_warm
         cmd_cache_warm(key, model, system=args.cache_system or None,
                        doc_files=args.cache_docs or [], ttl=args.cache_ttl); return
+    if args.cache_multi_turn:
+        from claude_cache import cmd_cache_multi_turn
+        cmd_cache_multi_turn(args.cache_multi_turn, key, model,
+                             system=args.cache_system or None, ttl=args.cache_ttl,
+                             mid_system=args.cache_mid_system or None,
+                             mid_system_after=args.cache_mid_system_after,
+                             show_stats=args.cache_stats); return
     if args.cache:
-        from api.claude_cache import cmd_cache_generate
+        from claude_cache import cmd_cache_generate
         docs = [open(f).read() for f in (args.cache_docs or [])]
         cmd_cache_generate(args.prompt or "", key, model,
                            system=args.cache_system or None, docs=docs,
-                           ttl=args.cache_ttl, show_stats=args.cache_stats); return
+                           ttl=args.cache_ttl, show_stats=args.cache_stats,
+                           diagnose=args.cache_diagnose); return
     if args.tool_agent:
-        from core.claude_tools import cmd_tool_agent
+        from claude_tools import cmd_tool_agent
         cmd_tool_agent(args.prompt or "", key, model,
                        max_turns=args.max_turns); return
     if args.server_tool:
-        from core.claude_tools import cmd_server_tool
+        from claude_tools import cmd_server_tool
         extra_tool_defs = None
         if args.file:
             import json as _json
@@ -864,83 +1375,83 @@ def main():
                         use_ptc=args.ptc,
                         extra_tool_defs=extra_tool_defs); return
     if args.memory_agent:
-        from core.claude_tools import cmd_memory_agent
+        from claude_tools import cmd_memory_agent
         cmd_memory_agent(args.memory_agent, key, model,
                          memory_dir=args.memory_dir, max_turns=args.max_turns); return
     if args.advisor:
-        from agents.claude_advisor import cmd_advisor
+        from claude_advisor import cmd_advisor
         cmd_advisor(args.advisor, key, model,
                    advisor_model=args.advisor_model,
                    max_uses=args.advisor_max_uses or None,
                    advisor_max_tokens=args.advisor_max_tokens or None); return
     if args.embed:
-        from utils.claude_embeddings import cmd_embed
+        from claude_embeddings import cmd_embed
         cmd_embed(args.embed, model=args.embed_model, input_type=args.embed_input_type); return
     if args.embed_file:
-        from utils.claude_embeddings import cmd_embed_file
+        from claude_embeddings import cmd_embed_file
         cmd_embed_file(args.embed_file, model=args.embed_model,
                        input_type=args.embed_input_type); return
     if args.embed_similarity:
-        from utils.claude_embeddings import cmd_embed_similarity
+        from claude_embeddings import cmd_embed_similarity
         cmd_embed_similarity(args.embed_similarity[0], args.embed_similarity[1],
                              model=args.embed_model); return
     if args.stream_tools:
-        from api.claude_stream import cmd_stream_tools
+        from claude_stream import cmd_stream_tools
         import json as _json
         tool_defs = _json.loads(_read_file(args.file)) if args.file else []
         if isinstance(tool_defs, dict):
             tool_defs = [tool_defs]
         cmd_stream_tools(args.stream_tools, tool_defs, key, model); return
     if args.structured:
-        from api.claude_structured import cmd_structured
+        from claude_structured import cmd_structured
         cmd_structured(args.prompt or "", key, model,
                        schema_path=args.schema, schema_inline=args.schema_inline); return
     if args.structured_analyse:
-        from api.claude_structured import cmd_structured_analyse
+        from claude_structured import cmd_structured_analyse
         cmd_structured_analyse(args.structured_analyse, key, model); return
     if args.structured_extract:
-        from api.claude_structured import cmd_structured_extract
+        from claude_structured import cmd_structured_extract
         cmd_structured_extract(args.structured_extract, args.schema, key, model); return
     if args.file_upload:
-        from api.claude_files import cmd_file_upload
+        from claude_files import cmd_file_upload
         cmd_file_upload(args.file_upload, key, model); return
     if args.file_list:
-        from api.claude_files import cmd_file_list; cmd_file_list(key, model); return
+        from claude_files import cmd_file_list; cmd_file_list(key, model); return
     if args.file_delete:
-        from api.claude_files import cmd_file_delete; cmd_file_delete(args.file_delete, key); return
+        from claude_files import cmd_file_delete; cmd_file_delete(args.file_delete, key); return
     if args.file_ask:
-        from api.claude_files import cmd_file_ask
+        from claude_files import cmd_file_ask
         cmd_file_ask(args.file_ask, args.prompt or "Summarise.", key, model,
                      media_type=args.file_media_type); return
     if args.file_download:
-        from api.claude_files import cmd_file_download
+        from claude_files import cmd_file_download
         cmd_file_download(args.file_download,
                           args.file_output or args.output or f"{args.file_download}.bin", key); return
     if args.code_exec:
-        from core.claude_code_exec import cmd_code_exec
+        from claude_code_exec import cmd_code_exec
         cmd_code_exec(args.prompt or "", key, model,
                       output_dir=args.code_exec_output or None); return
     if args.code_debug:
-        from core.claude_code_exec import cmd_code_debug
+        from claude_code_exec import cmd_code_debug
         cmd_code_debug(args.code_debug, key, model); return
     if args.count_tokens:
-        from utils.claude_tokens import cmd_count_tokens
+        from claude_tokens import cmd_count_tokens
         cmd_count_tokens(args.prompt or "", key, model,
                          file_path=args.file, budget=args.count_budget or None); return
     if args.cite:
-        from api.claude_citations import cmd_cite
+        from claude_citations import cmd_cite
         cmd_cite(args.prompt or "", args.cite, key, model); return
     if args.rag:
-        from api.claude_citations import cmd_rag
+        from claude_citations import cmd_rag
         cmd_rag(args.prompt or "", args.rag, key, model, pattern=args.rag_pattern); return
     if args.computer_use:
-        from api.claude_models import cmd_computer_use
+        from claude_models import cmd_computer_use
         cmd_computer_use(args.computer_use, key, model); return
     if args.interleaved_thinking:
-        from api.claude_models import cmd_adaptive_thinking
+        from claude_models import cmd_adaptive_thinking
         cmd_adaptive_thinking(args.prompt or "", key, model, effort=args.effort or "medium"); return
     if args.agent_session or args.agent_orchestrate:
-        from agents.claude_agents_sdk import cmd_agent_chat, cmd_agent_orchestrate
+        from claude_agents_sdk import cmd_agent_chat, cmd_agent_orchestrate
         if args.agent_orchestrate:
             cmd_agent_orchestrate(args.prompt or "", key, model,
                                   session_id=args.agent_session)
@@ -948,15 +1459,102 @@ def main():
             cmd_agent_chat(args.prompt or "", key, model,
                            session_id=args.agent_session)
         return
+    if args.agent_dream:
+        from claude_agents_sdk import cmd_agent_dream
+        sess_ids = [s.strip() for s in args.agent_dream_sessions.split(",") if s.strip()] or None
+        cmd_agent_dream(args.agent_dream, key, model=model, session_ids=sess_ids,
+                        instructions=args.agent_dream_instructions or None); return
+    if args.agent_dream_get:
+        from claude_agents_sdk import cmd_agent_dream_get
+        cmd_agent_dream_get(args.agent_dream_get, key); return
+    if args.agent_dream_list:
+        from claude_agents_sdk import cmd_agent_dream_list
+        cmd_agent_dream_list(key); return
+    if args.agent_webhook_register:
+        from claude_agents_sdk import cmd_agent_webhook_register
+        events = [e.strip() for e in args.agent_webhook_events.split(",") if e.strip()] or None
+        cmd_agent_webhook_register(args.agent_webhook_register, key, events=events); return
+    if args.agent_vault_create:
+        from claude_agents_sdk import cmd_agent_vault_create
+        cmd_agent_vault_create(args.agent_vault_create, key,
+                               external_user_id=args.agent_vault_external_user or None); return
+    if args.agent_vault_add_credential:
+        from claude_agents_sdk import cmd_agent_vault_add_credential
+        if not args.agent_vault_cred_type:
+            print("[ERROR] --agent-vault-add-credential requires --agent-vault-cred-type"); sys.exit(1)
+        domains = [d.strip() for d in args.agent_vault_allowed_domains.split(",") if d.strip()] or None
+        cmd_agent_vault_add_credential(
+            args.agent_vault_add_credential, args.agent_vault_cred_type, key,
+            mcp_server_url=args.agent_vault_mcp_url or None,
+            secret_name=args.agent_vault_secret_name or None,
+            secret_value=args.agent_vault_secret,
+            allowed_domains=domains,
+            injection_location=args.agent_vault_injection_location,
+        ); return
+    if args.agent_vault_list:
+        from claude_agents_sdk import cmd_agent_vault_list
+        cmd_agent_vault_list(key); return
+    if args.agent_schedule_create:
+        from claude_agents_sdk import cmd_agent_schedule_create
+        if not args.agent_schedule_env or not args.agent_schedule_cron:
+            print("[ERROR] --agent-schedule-create requires --agent-schedule-env "
+                  "and --agent-schedule-cron"); sys.exit(1)
+        cmd_agent_schedule_create(args.agent_schedule_create, args.agent_schedule_env,
+                                  args.agent_schedule_cron, key,
+                                  timezone=args.agent_schedule_tz,
+                                  task=args.agent_schedule_task); return
+    if args.agent_schedule_list:
+        from claude_agents_sdk import cmd_agent_schedule_list
+        cmd_agent_schedule_list(key); return
+    if args.agent_schedule_cancel:
+        from claude_agents_sdk import cmd_agent_schedule_cancel
+        cmd_agent_schedule_cancel(args.agent_schedule_cancel, key); return
+    if args.agent_deployment_runs:
+        from claude_agents_sdk import cmd_agent_deployment_runs
+        cmd_agent_deployment_runs(key,
+                                  deployment_id=args.agent_deployment_run_filter,
+                                  has_error=True if args.agent_deployment_run_errors else None,
+                                  run_id=args.agent_deployment_run_id); return
+    if args.agent_user_profile_list:
+        from claude_agents_sdk import cmd_agent_user_profile_list
+        cmd_agent_user_profile_list(key); return
+    if args.agent_user_profile_create:
+        from claude_agents_sdk import cmd_agent_user_profile_create
+        cmd_agent_user_profile_create(args.agent_user_profile_create, key,
+                                       external_id=args.agent_user_profile_external_id); return
+    if args.agent_review_multiagent:
+        from claude_agents_sdk import cmd_agent_review_multiagent
+        specialists = [s.strip() for s in args.agent_review_specialists.split(",") if s.strip()]
+        cmd_agent_review_multiagent(args.agent_review_multiagent, specialists, key, model=model); return
+    if args.agent_outcome_rubric_upload:
+        from claude_agents_sdk import cmd_agent_outcome_rubric_upload
+        cmd_agent_outcome_rubric_upload(args.agent_outcome_rubric_upload, key, model); return
     if args.agent_managed_run:
         # Real hosted Claude Managed Agents API (/v1/agents, /v1/environments,
         # /v1/sessions) — distinct from --agent-session above, which runs a
         # local agent loop over the plain Messages API. See
         # claude_agents_sdk.ManagedAgentsClient.
-        from agents.claude_agents_sdk import cmd_managed_agent_run
-        cmd_managed_agent_run(args.agent_managed_run, key, model=model); return
+        from claude_agents_sdk import cmd_managed_agent_run
+        outcome_rubric_text = None
+        if args.agent_outcome_rubric:
+            outcome_rubric_text = Path(args.agent_outcome_rubric).read_text(encoding="utf-8")
+        if args.agent_outcome and not outcome_rubric_text and not args.agent_outcome_rubric_file:
+            print("[ERROR] --agent-outcome requires --agent-outcome-rubric FILE "
+                  "or --agent-outcome-rubric-file FILE_ID"); sys.exit(1)
+        cmd_managed_agent_run(args.agent_managed_run, key, model=model,
+                              memory_store=args.agent_memory_store or None,
+                              outcome_description=args.agent_outcome or None,
+                              outcome_rubric=outcome_rubric_text,
+                              outcome_rubric_file_id=args.agent_outcome_rubric_file or None,
+                              outcome_max_iterations=args.agent_outcome_max_iter,
+                              vault_id=args.agent_vault or None); return
+    if args.agent_memory_store_create:
+        from claude_agents_sdk import cmd_agent_memory_store_create
+        if not args.agent_memory_store:
+            print("[ERROR] --agent-memory-store-create requires --agent-memory-store NAME"); sys.exit(1)
+        cmd_agent_memory_store_create(args.agent_memory_store, key); return
     if args.cowork:
-        from agents.cowork import cmd_cowork
+        from cowork import cmd_cowork
         prompt = args.cowork_prompt or args.prompt or ""
         if not prompt:
             print("[ERROR] --cowork requires -p or --cowork-prompt"); sys.exit(1)
@@ -966,10 +1564,10 @@ def main():
 
     # Claude Code commands
     if args.code_agent_mcp_tunnel:
-        from agents.claude_agents_sdk import cmd_mcp_tunnel_open
+        from claude_agents_sdk import cmd_mcp_tunnel_open
         cmd_mcp_tunnel_open(key, args.code_agent_mcp_tunnel); return
     if args.code_agent or args.code_agent_session or args.code_agent_resume:
-        from core.claude_code import cmd_code_agent
+        from claude_code import cmd_code_agent
         prompt = args.prompt or ""
         if not prompt:
             print("[ERROR] --code-agent requires -p PROMPT"); sys.exit(1)
@@ -990,34 +1588,35 @@ def main():
             sandbox_allow_net=args.code_agent_sandbox_allow_net,
             sandbox_roots=args.code_agent_sandbox_roots or [],
             headless=args.code_agent_headless,
+            agent_context_editing=args.agent_context_editing,
         ); return
     if args.code_agent_subagent:
-        from core.claude_code import cmd_code_subagent
+        from claude_code import cmd_code_subagent
         cmd_code_subagent(args.code_agent_subagent, key, model,
                           cwd=args.code_agent_cwd); return
     if args.code_agent_todo:
-        from core.claude_code import cmd_code_todo
+        from claude_code import cmd_code_todo
         cmd_code_todo(args.code_agent_todo, key, model); return
     if args.code_agent_slash:
-        from core.claude_code import cmd_code_slash
+        from claude_code import cmd_code_slash
         cmd_code_slash(args.code_agent_slash, key, model,
                        cwd=args.code_agent_cwd, prompt=args.prompt or ""); return
     if args.code_agent_cost:
-        from core.claude_code import cmd_code_cost
+        from claude_code import cmd_code_cost
         cmd_code_cost(key); return
 
     if args.project_plan:
-        from core.projects import cmd_project_plan
-        from core.coder import Coder
+        from projects import cmd_project_plan
+        from coder import Coder
         cmd_project_plan(args.project_plan, Coder(api_key=key, model=model)); return
     if args.project_run:
-        from core.projects import cmd_project_run
-        from core.coder import Coder
+        from projects import cmd_project_run
+        from coder import Coder
         cmd_project_run(args.project_run, args.task or "all",
                         Coder(api_key=key, model=model)); return
     if args.artifact_create:
         from artifacts import cmd_artifact_create
-        from core.coder import Coder
+        from coder import Coder
         if not args.prompt:
             print("[ERROR] --artifact-create requires -p"); sys.exit(1)
         tags = [t.strip() for t in args.artifact_tags.split(",") if t.strip()]
@@ -1028,16 +1627,18 @@ def main():
                             coder=Coder(api_key=key, model=model)); return
     if args.artifact_iterate:
         from artifacts import cmd_artifact_iterate
-        from core.coder import Coder
+        from coder import Coder
         cmd_artifact_iterate(args.artifact_iterate, args.prompt or "",
                              Coder(api_key=key, model=model)); return
 
     if args.prompt or args.file:
-        from core.coder import Coder
+        from coder import Coder
         c = Coder(api_key=key, model=model,
                   temperature=args.temperature, max_tokens=args.max_tokens,
                   service_tier=args.service_tier, inference_geo=args.inference_geo,
                   fast_mode=args.fast_mode,
+                  user_profile_id=args.user_profile,
+                  effort=args.effort or None,
                   # Previously never sourced from a CLI flag at all — see
                   # the Skills & Agents arg group comment above.
                   personality_style=args.personality)
@@ -1046,7 +1647,7 @@ def main():
         # and discarded.
         system_parts = []
         if args.skill:
-            from core.skills import SkillManager
+            from skills import SkillManager
             skill = SkillManager().get_skill(args.skill)
             if skill:
                 system_parts.append(f"Skill focus — {skill['name']}: {skill['description']}")

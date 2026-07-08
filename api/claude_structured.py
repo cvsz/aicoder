@@ -23,11 +23,16 @@ import urllib.error
 from typing import Optional
 from pathlib import Path
 
+from exceptions import AICoderError
+from resilience import CircuitBreaker, retry, urlopen_json
+
+_breaker = CircuitBreaker(failure_threshold=5, reset_timeout=30)
+
 
 class StructuredCoder:
     """Claude client for structured / JSON outputs."""
 
-    ENDPOINT = "http://192.168.74.128:20128/v1/messages"
+    ENDPOINT = "https://api.anthropic.com/v1/messages"
     BETA     = "output-128k-2025-02-19"
 
     def __init__(self, api_key: str, model: str = "claude-sonnet-5",
@@ -36,7 +41,8 @@ class StructuredCoder:
         self.model      = model
         self.max_tokens = max_tokens
 
-    def _post(self, payload: dict) -> dict:
+    @retry(max_attempts=4, base_delay=1.0, max_delay=15.0, breaker=_breaker)
+    def _call(self, payload: dict) -> dict:
         headers = {
             "Content-Type":    "application/json",
             "x-api-key":       self.api_key,
@@ -49,11 +55,15 @@ class StructuredCoder:
             headers=headers,
             method="POST",
         )
+        return urlopen_json(req, timeout=120)
+
+    def _post(self, payload: dict) -> dict:
+        # Preserves the pre-existing {"error": ...} contract callers below
+        # already check for, while retrying transient failures in _call().
         try:
-            with urllib.request.urlopen(req, timeout=120) as r:
-                return json.loads(r.read().decode())
-        except urllib.error.HTTPError as e:
-            return {"error": e.read().decode(), "status": e.code}
+            return self._call(payload)
+        except AICoderError as e:
+            return {"error": e.message, "status": getattr(e, "status_code", None)}
         except Exception as e:
             return {"error": str(e)}
 

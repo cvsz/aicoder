@@ -8,7 +8,7 @@ then generates a grounded, cited response. Uses the Files API to
 upload large corpora once and reference them cheaply across queries.
 """
 
-from core.utils import sampling_kwargs
+from utils import sampling_kwargs
 
 import json
 import math

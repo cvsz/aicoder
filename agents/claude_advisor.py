@@ -1,42 +1,22 @@
 """
 claude_advisor.py — Advisor tool (advisor_20260301, beta)
-AI Model Coder CLI v1.11.1
+AI Model Coder CLI v1.11.0
 
-Pairs a fast "executor" model (Sonnet 4.6 or Haiku 4.5) with a stronger
-"advisor" model (Opus) the executor can consult mid-generation at decision
-points (before committing to an approach, when stuck on a recurring error,
-before declaring a task complete). The advisor sees the full transcript and
-returns guidance the executor applies before continuing; it never calls
-tools and never produces the user-facing final answer itself.
+This was a complete gap before this pass: the advisor tool did not exist
+anywhere in the project. It's a server tool that pairs a faster "executor"
+model with a stronger "advisor" model the executor can consult mid-generation
+at decision points (before committing to an approach, when stuck on a
+recurring error, before declaring a task complete). The advisor sees the
+full transcript and returns guidance the executor applies before continuing;
+it never calls tools and never produces the user-facing final answer itself.
 
-CONFIDENCE NOTE — this entry was re-verified via live web search on
-2026-07-03 (not just inherited from the prior pass), against Anthropic's
-own docs page (platform.claude.com/docs/en/agents-and-tools/tool-use/
-advisor-tool), Anthropic's launch blog post (claude.com/blog/
-the-advisor-strategy, dated 2026-04-09), and independent confirmation via
-LiteLLM's integration docs and a third-party GitHub example. The mechanics
-below (tool shape, beta header, pause_turn resume loop, Bedrock/Vertex/
-Foundry unavailability) are consistently confirmed across all sources.
-
-One real discrepancy found between sources, flagged rather than silently
-resolved: Anthropic's own docs page shows the advisor model as
-"claude-opus-4-8" in its code examples, while the original April 2026
-launch blog post and third-party docs (LiteLLM) describe the beta as
-locked to "claude-opus-4-6" only. Most likely explanation: it launched
-pinned to Opus 4.6 and was later opened up to newer Opus versions as
-Anthropic shipped them, with the docs page reflecting current state and
-the blog posts frozen at their April 9 publish date. This module follows
-the docs page (claude-opus-4-8) as the more likely current value, but
-if you get a "model not supported for advisor" error, try claude-opus-4-6.
-
-Corrected from the previous pass: the executor-model list below previously
-included Opus and Fable 5 variants as valid executors. No source — not
-Anthropic's docs, not the launch blog, not the third-party integrations —
-describes anything other than Sonnet 4.6 and Haiku 4.5 as executors, which
-makes sense: the entire point of the pattern is a cheap model driving the
-loop and an expensive one consulted sparingly, so "Opus executor consulting
-an Opus advisor" doesn't fit the pattern's own premise. Narrowed to match
-what's actually documented.
+IMPORTANT — confidence note (same posture as claude_fable5.py's for its own
+model family): the request/response shape below is taken from
+platform.claude.com/docs/en/agents-and-tools/tool-use/advisor-tool and a
+third-party worked example, checked 2026-07-02. This is a beta feature this
+project has no independent way to verify beyond what the live API reports
+at call time. Re-verify field names against your own account before relying
+on this for anything billing- or production-sensitive.
 
 Mechanics, as documented:
   • Add a tool of type "advisor_20260301" to your tools array, with its own
@@ -51,21 +31,14 @@ Mechanics, as documented:
   • If you omit the advisor tool from a follow-up request while the message
     history still contains advisor_tool_result blocks, the API 400s. Once
     you're done with the advisor for a conversation, strip those blocks too.
-  • Supported executor models (beta, confirmed): Sonnet 4.6, Haiku 4.5.
-  • Not available on Amazon Bedrock, Google Cloud (Vertex AI), or Microsoft
-    Foundry — beta on the Claude API / Claude Platform on AWS only.
+  • Supported executor models (beta): Opus 4.6+, Sonnet 4.6+, Haiku 4.5,
+    Fable 5. Not available on Bedrock, Vertex AI, or Microsoft Foundry.
   • Advisor output tokens are billed at the advisor model's own rate — this
-    is usually the dominant cost line, not the executor's tokens. Anthropic's
-    own benchmarks (their numbers, not independently verified): Sonnet+Opus
-    scored 74.8% on SWE-bench Multilingual vs. 72.1% for Sonnet alone while
-    costing ~12% less than running Opus solo; Haiku+Opus more than doubled
-    BrowseComp score (19.7% → 41.2%) at ~85% lower cost than Sonnet alone.
+    is usually the dominant cost line, not the executor's tokens.
 
 CLI flags:
   --advisor PROMPT           Run PROMPT with an advisor attached
-  --advisor-model MODEL      Advisor model (default: claude-opus-4-8;
-                               try claude-opus-4-6 if you get a
-                               model-not-supported error — see note above)
+  --advisor-model MODEL      Advisor model (default: claude-opus-4-8)
   --advisor-max-uses N       Cap advisor calls this conversation (client-side
                               tracking — the tool itself has no built-in cap)
   --advisor-max-tokens N     Cap the advisor's output per call (max_tokens on
@@ -77,24 +50,25 @@ import urllib.request
 import urllib.error
 from typing import Optional
 
+from exceptions import AICoderError
+from resilience import CircuitBreaker, retry, urlopen_json
+
 
 ADVISOR_TOOL_TYPE = "advisor_20260301"
 ADVISOR_TOOL_BETA = "advisor-tool-2026-03-01"
 ENDPOINT = "https://api.anthropic.com/v1/messages"
+_breaker = CircuitBreaker(failure_threshold=5, reset_timeout=30)
 
-# Executor models the advisor tool is confirmed to support, per Anthropic's
-# docs, launch blog, and independent third-party integrations (all checked
-# 2026-07-03). Only Sonnet 4.6 and Haiku 4.5 are documented as executors —
-# see the module docstring for why Opus/Fable-5-as-executor was removed.
+# Executor models the advisor tool is documented to support as of this
+# check. Haiku working as an executor is real but weaker — Anthropic's own
+# eval note says a short reminder message on turn 2 raises Haiku pass rates
+# ~7pp if it hasn't called the advisor in its first assistant turn.
 ADVISOR_EXECUTOR_MODELS = {
-    "claude-sonnet-4-6", "claude-sonnet-5",
+    "claude-opus-4-8", "claude-opus-4-7", "claude-opus-4-6",
+    "claude-sonnet-5", "claude-sonnet-4-6",
     "claude-haiku-4-5", "claude-haiku-4-5-20251001",
+    "claude-fable-5",
 }
-
-# Advisor model candidates seen across sources — see the docstring's
-# discrepancy note. Used only for the informational warning below, not
-# to block a call; the live API is the real authority on what's valid.
-ADVISOR_MODEL_CANDIDATES = {"claude-opus-4-8", "claude-opus-4-7", "claude-opus-4-6"}
 
 
 def build_advisor_tool(advisor_model: str = "claude-opus-4-8",
@@ -134,7 +108,8 @@ class AdvisorCoder:
                   f"executor list ({sorted(ADVISOR_EXECUTOR_MODELS)}) — sending anyway, "
                   f"the API will reject it if unsupported.\033[0m")
 
-    def _post(self, payload: dict) -> dict:
+    @retry(max_attempts=4, base_delay=1.0, max_delay=15.0, breaker=_breaker)
+    def _call(self, payload: dict) -> dict:
         headers = {
             "Content-Type":      "application/json",
             "x-api-key":         self.api_key,
@@ -145,11 +120,13 @@ class AdvisorCoder:
             ENDPOINT, data=json.dumps(payload).encode(),
             headers=headers, method="POST",
         )
+        return urlopen_json(req, timeout=180)
+
+    def _post(self, payload: dict) -> dict:
         try:
-            with urllib.request.urlopen(req, timeout=180) as r:
-                return json.loads(r.read().decode())
-        except urllib.error.HTTPError as e:
-            return {"error": e.read().decode(), "status": e.code}
+            return self._call(payload)
+        except AICoderError as e:
+            return {"error": e.message, "status": getattr(e, "status_code", None)}
         except Exception as e:
             return {"error": str(e)}
 

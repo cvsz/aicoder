@@ -298,7 +298,7 @@ class HooksEngine:
     def with_plugins(cls, base: "HooksEngine") -> "HooksEngine":
         """Merge plugin-bundled hooks.json files into an existing engine's config."""
         try:
-            from core.claude_plugins import load_plugin_hooks
+            from claude_plugins import load_plugin_hooks
             plugin_hooks = load_plugin_hooks()
         except ImportError:
             return base
@@ -392,7 +392,7 @@ class McpConnector:
             except Exception as e:
                 print(f"  [WARN] .mcp.json parse error: {e}")
         try:
-            from core.claude_plugins import load_plugin_mcp_servers
+            from claude_plugins import load_plugin_mcp_servers
             mc.servers.update(load_plugin_mcp_servers())
         except ImportError:
             pass
@@ -455,7 +455,7 @@ class SubagentRegistry:
 
         # Plugin-bundled agents (.claude/plugins/installed/<plugin>/agents/*.md)
         try:
-            from core.claude_plugins import load_plugin_agents
+            from claude_plugins import load_plugin_agents
             for entry in load_plugin_agents():
                 self._load_one(Path(entry["path"]), plugin=entry["plugin"],
                                namespace=f"{entry['plugin']}:{entry['name']}")
@@ -557,7 +557,7 @@ class SkillsRegistry:
                 "path": "", "source": "anthropic",
             }
         try:
-            from core.claude_plugins import load_plugin_skills
+            from claude_plugins import load_plugin_skills
             for entry in load_plugin_skills():
                 content = Path(entry["path"]).read_text()
                 desc = next((l.lstrip("# ").strip()
@@ -666,7 +666,11 @@ class MemoryManager:
 import urllib.request
 import urllib.error
 
-MESSAGES_ENDPOINT = "http://192.168.74.128:20128/v1/messages"
+from exceptions import AICoderError
+from resilience import CircuitBreaker, raise_for_http_error, retry, urlopen_json
+
+MESSAGES_ENDPOINT = "https://api.anthropic.com/v1/messages"
+_breaker = CircuitBreaker(failure_threshold=5, reset_timeout=30)
 
 
 class CodeAgent:
@@ -681,24 +685,40 @@ class CodeAgent:
         self.model      = model
         self.max_tokens = max_tokens
 
-    def _post(self, payload: dict) -> dict:
+    @retry(max_attempts=4, base_delay=1.0, max_delay=15.0, breaker=_breaker)
+    def _call(self, payload: dict, betas: Optional[list] = None) -> dict:
         headers = {
             "Content-Type":      "application/json",
             "x-api-key":         self.api_key,
             "anthropic-version": "2023-06-01",
         }
+        if betas:
+            headers["anthropic-beta"] = ",".join(betas)
         req = urllib.request.Request(
             MESSAGES_ENDPOINT,
             data=json.dumps(payload).encode(),
             headers=headers, method="POST",
         )
+        return urlopen_json(req, timeout=300)
+
+    def _post(self, payload: dict, betas: Optional[list] = None) -> dict:
         try:
-            with urllib.request.urlopen(req, timeout=300) as r:
-                return json.loads(r.read().decode())
-        except urllib.error.HTTPError as e:
-            return {"error": e.read().decode(), "status": e.code}
+            return self._call(payload, betas)
+        except AICoderError as e:
+            return {"error": e.message, "status": getattr(e, "status_code", None)}
         except Exception as e:
             return {"error": str(e)}
+
+    # No CircuitBreaker: WebFetch targets a different, arbitrary URL each
+    # time (agent-chosen), not one fixed downstream dependency.
+    @retry(max_attempts=2, base_delay=1.0, max_delay=5.0)
+    def _webfetch_retrying(self, url: str) -> str:
+        req = urllib.request.Request(url, headers={"User-Agent": "ai-coder-agent/1.8"})
+        try:
+            with urllib.request.urlopen(req, timeout=15) as r:
+                return r.read().decode("utf-8", errors="replace")[:4000]
+        except (urllib.error.HTTPError, TimeoutError, ConnectionError, OSError) as e:
+            raise_for_http_error(e)
 
     def _build_tools(self, preset: str, allowed: list) -> list:
         """Build tool definitions for the agentic loop."""
@@ -805,7 +825,7 @@ class CodeAgent:
                 timeout = inputs.get("timeout", 30)
                 if os.environ.get("AI_CODER_SANDBOX") == "1":
                     try:
-                        from core.claude_sandbox import enforce, SandboxViolation
+                        from claude_sandbox import enforce, SandboxViolation
                         roots = json.loads(os.environ.get("AI_CODER_SANDBOX_ROOTS", "[]"))
                         allow_net = os.environ.get("AI_CODER_SANDBOX_NET") == "1"
                         enforce(cmd, cwd, allow_net=allow_net, extra_roots=roots)
@@ -853,10 +873,7 @@ class CodeAgent:
 
             elif name == "WebFetch":
                 try:
-                    req = urllib.request.Request(inputs["url"],
-                        headers={"User-Agent": "ai-coder-agent/1.8"})
-                    with urllib.request.urlopen(req, timeout=15) as r:
-                        return r.read().decode("utf-8", errors="replace")[:4000]
+                    return self._webfetch_retrying(inputs["url"])
                 except Exception as e:
                     return f"[WebFetch error] {e}"
 
@@ -895,10 +912,19 @@ class CodeAgent:
         can_use_tool: Callable = None,
         output_mode: str = "stream",
         system_extra: str = "",
+        context_management: Optional[dict] = None,
     ) -> str:
         """
         Full agentic query loop.
         Streams or returns final text depending on output_mode.
+
+        context_management: pass a payload built by
+        claude_tools.build_context_management() to auto-clear stale tool
+        results (and optionally thinking blocks) once the conversation
+        crosses a token trigger — distinct from and complementary to
+        Compaction (which summarizes instead of dropping). Opt-in: None by
+        default, so this doesn't change behavior for existing callers. See
+        --agent-context-editing in cmd_code_agent / main.py.
         """
         hooks  = hooks or HooksEngine()
         memory = MemoryManager()
@@ -940,10 +966,16 @@ class CodeAgent:
             if tool_defs and permission != "planMode":
                 payload["tools"] = tool_defs
 
+            betas = []
+            if context_management is not None:
+                payload["context_management"] = context_management
+                from claude_tools import CONTEXT_MANAGEMENT_BETA
+                betas.append(CONTEXT_MANAGEMENT_BETA)
+
             if output_mode == "stream":
                 print(f"\033[90m[turn {turn+1}]\033[0m ", end="", flush=True)
 
-            data = self._post(payload)
+            data = self._post(payload, betas=betas or None)
             if "error" in data:
                 return f"[ERROR] {data['error']}"
 
@@ -1057,8 +1089,16 @@ def cmd_code_agent(
     sandbox: bool = False, sandbox_allow_net: bool = False,
     sandbox_roots: list = None,
     headless: bool = False,
+    agent_context_editing: bool = False,
 ):
-    """Main --code-agent entry point."""
+    """Main --code-agent entry point.
+
+    agent_context_editing: opt-in context editing (clear_tool_uses) for this
+    agent loop, on top of the existing Compaction support — the two are
+    complementary (clearing drops stale tool results; Compaction summarizes
+    the whole conversation), so this is safe to combine with an already
+    long-running session. See --agent-context-editing.
+    """
     if not headless:
         print(f"\033[94mℹ Claude Code Agent | tools={tools} | permission={permission}\033[0m")
         print(f"  cwd: {Path(cwd).resolve()}\n")
@@ -1079,7 +1119,7 @@ def cmd_code_agent(
     # Output style: append style instructions to the session's system prompt
     if output_style:
         try:
-            from core.claude_output_styles import system_prompt_fragment
+            from claude_output_styles import system_prompt_fragment
             fragment = system_prompt_fragment(output_style)
             if fragment:
                 session.system_prompt = (session.system_prompt + "\n\n" + fragment).strip()
@@ -1109,7 +1149,7 @@ def cmd_code_agent(
 
     # Plugin bin/ dirs onto PATH for the duration of this run
     try:
-        from core.claude_plugins import plugin_bin_paths
+        from claude_plugins import plugin_bin_paths
         extra_bins = plugin_bin_paths()
         if extra_bins:
             os.environ["PATH"] = os.pathsep.join(extra_bins) + os.pathsep + os.environ.get("PATH", "")
@@ -1130,6 +1170,16 @@ def cmd_code_agent(
     # suitable for piping into other tools or scripts (matches `claude -p`).
     effective_output_mode = "text" if headless else output_mode
 
+    # Context editing (opt-in): reuses claude_tools.py's build_context_management
+    # rather than duplicating it, since that module already implements the
+    # full context_management payload shape.
+    cm = None
+    if agent_context_editing:
+        from claude_tools import build_context_management
+        cm = build_context_management(clear_tool_uses=True)
+        if not headless:
+            print(f"\033[90m  ⚙ Context editing enabled (clear_tool_uses)\033[0m")
+
     # Run
     agent  = CodeAgent(api_key=api_key, model=model)
     result = agent.query(
@@ -1137,6 +1187,7 @@ def cmd_code_agent(
         tools=tools, permission=permission,
         hooks=hooks_engine,
         output_mode=effective_output_mode,
+        context_management=cm,
     )
 
     if effective_output_mode != "stream":
@@ -1250,13 +1301,13 @@ def cmd_code_slash(command: str, api_key: str, model: str,
         elif cmd == "doctor":
             _run_doctor()
         elif cmd == "plugin":
-            from core.claude_plugins import cmd_plugin_list
+            from claude_plugins import cmd_plugin_list
             cmd_plugin_list()
         elif cmd == "output-style":
-            from core.claude_output_styles import cmd_list_output_styles
+            from claude_output_styles import cmd_list_output_styles
             cmd_list_output_styles()
         elif cmd == "statusline":
-            from core.claude_settings import cmd_status_line
+            from claude_settings import cmd_status_line
             cmd_status_line(model=model, cwd=cwd)
         return
 
@@ -1276,7 +1327,7 @@ def cmd_code_slash(command: str, api_key: str, model: str,
                     return
 
     try:
-        from core.claude_plugins import load_plugin_commands
+        from claude_plugins import load_plugin_commands
         for entry in load_plugin_commands():
             if entry["name"] == cmd or entry["name"].split(":", 1)[-1] == cmd:
                 content = Path(entry["path"]).read_text()
@@ -1368,7 +1419,7 @@ def _run_doctor():
         ("Sessions dir",           SESSIONS_DIR.exists()),
     ]
     try:
-        from core.claude_plugins import plugin_list, marketplace_list
+        from claude_plugins import plugin_list, marketplace_list
         checks.append(("Plugins installed", len(plugin_list()) > 0))
         checks.append(("Marketplaces registered", len(marketplace_list()) > 0))
     except ImportError:

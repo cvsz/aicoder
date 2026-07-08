@@ -49,6 +49,9 @@ import urllib.error
 from pathlib import Path
 from typing import Optional
 
+from resilience import retry
+from exceptions import AICoderError, TransientAPIError
+
 PLUGINS_ROOT     = Path(os.path.expanduser("~/.claude/plugins"))
 MARKETPLACES_DIR = PLUGINS_ROOT / "marketplaces"
 INSTALLED_DIR    = PLUGINS_ROOT / "installed"
@@ -165,6 +168,17 @@ def _is_url(s: str) -> bool:
     return s.startswith("http://") or s.startswith("https://") or s.startswith("git@")
 
 
+# No CircuitBreaker: a marketplace source is a one-off, user-specified URL,
+# not a fixed downstream dependency this process calls repeatedly.
+@retry(max_attempts=2, base_delay=1.0, max_delay=5.0)
+def _fetch_marketplace_source(url: str) -> bytes:
+    try:
+        with urllib.request.urlopen(url, timeout=30) as resp:
+            return resp.read()
+    except urllib.error.URLError as e:
+        raise TransientAPIError(f"could not fetch {url}: {e}") from e
+
+
 def marketplace_add(source: str, name: Optional[str] = None) -> dict:
     """
     Register a marketplace from a local directory, a .zip, or a URL
@@ -183,20 +197,18 @@ def marketplace_add(source: str, name: Optional[str] = None) -> dict:
         if source.endswith(".zip"):
             with tempfile.NamedTemporaryFile(suffix=".zip", delete=False) as tmp:
                 try:
-                    with urllib.request.urlopen(source, timeout=30) as resp:
-                        tmp.write(resp.read())
-                except urllib.error.URLError as e:
-                    raise RuntimeError(f"could not fetch {source}: {e}")
+                    tmp.write(_fetch_marketplace_source(source))
+                except AICoderError as e:
+                    raise RuntimeError(str(e.message)) from e
                 tmp_path = tmp.name
             with zipfile.ZipFile(tmp_path) as zf:
                 zf.extractall(dest)
             os.unlink(tmp_path)
         else:
             try:
-                with urllib.request.urlopen(source, timeout=30) as resp:
-                    raw = resp.read().decode("utf-8", errors="replace")
-            except urllib.error.URLError as e:
-                raise RuntimeError(f"could not fetch {source}: {e}")
+                raw = _fetch_marketplace_source(source).decode("utf-8", errors="replace")
+            except AICoderError as e:
+                raise RuntimeError(str(e.message)) from e
             dest.mkdir(parents=True, exist_ok=True)
             (dest / "marketplace.json").write_text(raw)
     else:

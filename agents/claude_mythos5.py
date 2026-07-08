@@ -39,7 +39,11 @@ import urllib.request
 import urllib.error
 from typing import Optional
 
-from agents.claude_fable5 import MESSAGES_ENDPOINT, FABLE_MYTHOS_INFO, MYTHOS5_MODEL_ID
+from claude_fable5 import MESSAGES_ENDPOINT, FABLE_MYTHOS_INFO, MYTHOS5_MODEL_ID
+from exceptions import AICoderError, APIError
+from resilience import CircuitBreaker, retry, urlopen_json
+
+_breaker = CircuitBreaker(failure_threshold=5, reset_timeout=30)
 
 # Re-exported for convenience so callers don't need to import claude_fable5
 # directly just to get the model ID or info table.
@@ -63,7 +67,8 @@ class Mythos5Client:
         self.api_key = api_key
         self.max_tokens = max_tokens
 
-    def _post(self, payload: dict) -> dict:
+    @retry(max_attempts=4, base_delay=1.0, max_delay=15.0, breaker=_breaker)
+    def _call(self, payload: dict) -> dict:
         headers = {
             "Content-Type": "application/json",
             "x-api-key": self.api_key,
@@ -73,20 +78,24 @@ class Mythos5Client:
             MESSAGES_ENDPOINT, data=json.dumps(payload).encode(),
             headers=headers, method="POST",
         )
+        return urlopen_json(req, timeout=300)
+
+    def _post(self, payload: dict) -> dict:
         try:
-            with urllib.request.urlopen(req, timeout=300) as r:
-                return json.loads(r.read().decode())
-        except urllib.error.HTTPError as e:
-            body = e.read().decode()
-            if e.code in (403, 404):
+            return self._call(payload)
+        except APIError as e:
+            if e.status_code in (403, 404):
+                body = e.details.get("body", "")
                 raise MythosAccessError(
-                    f"HTTP {e.code} calling claude-mythos-5 — this looks like an "
+                    f"HTTP {e.status_code} calling claude-mythos-5 — this looks like an "
                     "access-gate rejection rather than a normal API error. Mythos 5 "
                     "requires approved Project Glasswing access; most accounts will "
                     "see this. Use claude-fable-5 instead unless you've confirmed "
                     f"access with Anthropic. Raw response: {body}"
                 )
-            return {"error": body, "status": e.code}
+            return {"error": e.message, "status": e.status_code}
+        except AICoderError as e:
+            return {"error": e.message, "status": getattr(e, "status_code", None)}
         except Exception as e:
             return {"error": str(e)}
 

@@ -1,5 +1,244 @@
-# AI Model Coder CLI — v1.12.0 "Release"
+# AI Model Coder CLI — v1.23.0 "Deep Web Research Cycle"
 All Claude API Features + Claude Code / Agent SDK + Cowork + Plugins
+
+## New in v1.23.0 — Deep Web Research Cycle (18 gaps closed)
+
+Seven-pass deep web research against docs.anthropic.com, anthropic.com/news,
+anthropic.com/engineering, the Anthropic Python SDK changelog (41 versions),
+the live SDK client, and the Anthropic Cookbook. Full detail in
+`docs/36_research_claude_updates_2026q2.md` (610 lines, 11 parts).
+
+```bash
+# Thinking display control — "omitted" suppresses thinking token streaming
+# for lower latency (default on Fable 5, Mythos 5, Sonnet 5, Opus 4.8/4.7)
+python main.py --thinking --thinking-display omitted --prompt "Complex analysis"
+
+# xhigh effort level (24k thinking tokens) + output_config.effort on API
+python main.py --thinking --effort xhigh --prompt "Deep reasoning task"
+python main.py --effort high --prompt "Standard request with effort control"
+
+# Server tool version bumps — web_search/web_fetch now 20260318
+# New: response_inclusion, use_cache params
+python main.py --web-search --search-response-inclusion excluded --prompt "..."
+python main.py --web-fetch --fetch-no-cache --prompt "Fresh fetch please"
+
+# User profile attribution (multi-tenant billing)
+python main.py --user-profile profile_abc123 --prompt "..."
+
+# User profiles CRUD management
+python main.py --agent-user-profile-list
+python main.py --agent-user-profile-create "Acme Corp" --agent-user-profile-external-id acme-123
+
+# Deployment runs history (execution history for scheduled deployments)
+python main.py --agent-deployment-runs --agent-deployment-run-filter dep_01
+python main.py --agent-deployment-run-id run_abc
+python main.py --agent-deployment-runs --agent-deployment-run-errors
+```
+
+16 new tests (236 total). 8 module version strings bumped to v1.23.0.
+
+## New in v1.20.0 — Dreaming, Outcomes, Webhooks (Managed Agents)
+
+Three items closed from re-running `ROADMAP.md`'s gap-audit methodology
+against platform.claude.com/docs (checked 2026-07-08); see
+`IMPLEMENTATION_CHECKLIST.md` Form 10 and `docs/33_upgrade_v1.20.0.md`
+for the full write-up. Native Managed Agents Multiagent orchestration
+was found but deliberately deferred — see that doc and `ROADMAP.md`.
+
+```bash
+# P1 -- Dreaming (research preview): curate a memory store by reviewing
+# it alongside past session transcripts, producing a new, cleaned-up
+# output store (duplicates merged, stale entries dropped, patterns
+# promoted). The input store is never modified.
+python main.py --agent-dream project-x-notes-store-id \
+    --agent-dream-sessions sesn_01,sesn_02 \
+    --agent-dream-instructions "Focus on coding-style preferences"
+python main.py --agent-dream-get drm_01AbCDefGhIjKlMnOpQrStUv
+python main.py --agent-dream-list
+
+# P1 -- Outcomes (public beta): define a rubric and let the agent iterate
+# against an independent grader until it's satisfied, instead of a
+# single plain task
+python main.py --agent-managed-run "unused, ignored when --agent-outcome is set" \
+    --agent-outcome "Build a DCF model for Costco in .xlsx" \
+    --agent-outcome-rubric rubric.md --agent-outcome-max-iter 5
+
+# P2 -- Webhooks (public beta): get notified of session/outcome/dream
+# events instead of holding an SSE stream open
+python main.py --agent-webhook-register https://example.com/hooks/agents \
+    --agent-webhook-events session.status_idle,span.outcome_evaluation_end
+```
+
+## New in v1.19.0 — Managed Agents memory stores
+
+One item closed from re-running `ROADMAP.md`'s gap-audit methodology
+against platform.claude.com/docs (checked 2026-07-08); see
+`IMPLEMENTATION_CHECKLIST.md` Form 9 and `docs/32_upgrade_v1.19.0.md`
+for the full write-up.
+
+```bash
+# P1 -- create a persistent, workspace-scoped Managed Agents memory store
+# once, then mount it into a hosted-agent session so its work survives
+# past a single throwaway session (agent-memory-2026-07-22 beta)
+python main.py --agent-memory-store-create --agent-memory-store project-x-notes
+
+python main.py --agent-managed-run "Continue the refactor from last time" \
+    --agent-memory-store project-x-notes
+```
+
+## New in v1.18.0 — Mid-conversation system messages, Cache diagnostics CLI wiring
+
+Two items closed from re-running `ROADMAP.md`'s gap-audit methodology
+against platform.claude.com/docs (checked 2026-07-08); see
+`IMPLEMENTATION_CHECKLIST.md` Forms 7–8 and `docs/31_upgrade_v1.18.0.md`
+for the full write-up.
+
+```bash
+# P1 -- update Claude's instructions partway through an already-cached
+# conversation without invalidating the cached prefix (Opus 4.8 only)
+python main.py --cache --cache-multi-turn "First question" "Follow-up question" \
+    --cache-mid-system "From now on, answer in bullet points." \
+    --cache-mid-system-after 0 --model claude-opus-4-8
+
+# P2 -- Cache diagnostics (beta): report *why* a cache read missed
+# (client-side support existed since ~v1.10.x; this flag was the only
+# missing piece, so it was previously unreachable from the CLI)
+python main.py --cache -p "..." --cache-diagnose
+```
+
+## New in v1.17.0 — Resilience wired into every direct-HTTP module
+
+No new CLI flags — internal only. Every module that talks to the Claude
+API via raw `urllib` (19 of them, not just the ones going through the
+`anthropic` SDK client) now retries transient failures (429/5xx/network)
+with exponential backoff and fails fast via a circuit breaker once a
+downstream is clearly down. External behavior is unchanged — see
+`CHANGELOG.md` for the full module list.
+
+## New in v1.15.0 — Server-side fallback, context editing, Skills API, Admin API
+
+Five items closed out from `ROADMAP.md`'s gap audit against
+platform.claude.com/docs (checked 2026-07-04); see `CHECKLIST.md` for the
+itemized task list and `docs/29_upgrade_v1.15.0.md` for the full write-up.
+
+```bash
+# P0 -- let the platform retry a refused Fable 5 call itself, in one round
+# trip, instead of the existing client-side manual retry (--fallback-model)
+python main.py --fable5 "..." --fable5-fallback-chain claude-opus-4-8,claude-sonnet-5
+
+# P1 -- opt-in context editing for long --code-agent runs: auto-clears
+# stale tool results once the conversation crosses a token trigger,
+# complementary to (not a replacement for) existing Compaction support
+python main.py --code-agent -p "..." --agent-context-editing
+
+# P1 -- platform Agent Skills (skill_id-based), distinct from Claude Code's
+# local .claude/skills/*/SKILL.md loader; info-only for now
+python main.py --skills-list
+python main.py --skills-info xlsx
+
+# P2 -- Usage/Cost reporting and API key management (requires an Admin API
+# key, sk-ant-admin..., not a regular key)
+python main.py --usage-report --usage-report-group-by model
+python main.py --cost-report --cost-report-start 2026-06-01 --cost-report-end 2026-07-01
+python main.py --admin-list-keys
+python main.py --admin-revoke-key key_abc123
+python main.py --admin-create-key "new-key"   # explains why this isn't supported, doesn't fake it
+```
+
+Also new this release: `--excel-native` / `--pptx-native` route
+`--excel` / `--pptx` through the platform's pre-built Skills instead of
+the hand-rolled pandas/openpyxl / python-pptx exec loop, which stays as
+the fallback when Skills access isn't available.
+
+## New in v1.16.0 — Compliance API
+
+`claude_compliance_api.py` closes the gap the previous section left
+open — the roadmap's "revisit only if there's an actual concrete
+request" condition was met. Wraps the org-wide Activity Feed plus (with
+a Compliance Access Key) read/hard-delete access to chats, files, and
+projects, plus directory endpoints:
+
+```bash
+python main.py --compliance-activities --compliance-api-key sk-ant-api01-...
+python main.py --compliance-chats-list --compliance-user-ids user_abc,user_def
+python main.py --compliance-chat-delete chat_123                 # dry-run preview
+python main.py --compliance-chat-delete chat_123 --compliance-yes  # actually deletes
+```
+
+Every destructive flag (`--compliance-chat-delete`,
+`--compliance-file-delete`, `--compliance-project-delete`) is a dry-run
+preview unless `--compliance-yes` is also passed. See
+`docs/30_upgrade_v1.16.0.md` for the full key-model and reliability
+write-up.
+
+## New in v1.14.0 — Interactive chat + conversational Excel assistant
+
+`-i`/`--interactive` has existed as a bare CLI flag since v1.7.0 but was
+never actually wired to anything — passing it silently fell through to
+`parser.print_help()`. It's now a real persistent, multi-turn chat REPL.
+
+```bash
+# Chat interface — persistent multi-turn conversation
+python main.py -i
+python main.py -i --interactive-system "You are a terse Rust reviewer."
+```
+
+Inside the session: `/help`, `/reset`, `/system TEXT`, `/model NAME`,
+`/save FILE`, `/history`, `/exit`.
+
+Also new: `--excel`, a conversational spreadsheet assistant in the spirit
+of Anthropic's own Claude-in-Excel experience — no Office add-in, just a
+terminal chat that keeps a real `.xlsx` file in sync with the conversation.
+
+```bash
+# Build financial models, analyze data, and create tables and charts
+# with Claude directly in a real .xlsx file
+python main.py --excel messy_sales_data.csv --excel-output clean_model.xlsx
+
+# Transform complex data tasks or messy data clean-ups into simple
+# conversations — e.g. inside the session:
+#   you› drop empty rows, standardize the date column, and add a
+#         month-over-month growth % column
+#   you› build a simple 3-line revenue/cost/profit model from this data
+#   you› add a bar chart of revenue by region
+```
+
+Requires `pandas` and `openpyxl` (see `requirements.txt`) — every other
+flag in this CLI is unaffected if they aren't installed; only `--excel`
+needs them, and it errors out clearly if they're missing.
+
+This is a CLI hitting the Anthropic API directly with your own API key,
+not a Claude Pro/Max/Team/Enterprise consumer plan — there's no seat or
+plan gate here, `--excel` and `-i` work with any valid `ANTHROPIC_API_KEY`.
+
+See `docs/28_upgrade_v1.14.0.md` for full detail.
+
+## New in v1.13.0 — Enterprise hardening
+
+Production-readiness pass: structured JSON logging with automatic secret
+redaction, retry-with-backoff + a circuit breaker around the core API
+call, path/URL/input security controls, a `--health-check` flag for
+container orchestrators, and a full test suite + CI pipeline + Docker
+packaging. No existing CLI flags were removed or renamed. See
+`docs/27_upgrade_v1.13.0.md` for the full detail and `ARCHITECTURE.md` /
+`SECURITY.md` / `docs/deployment.md` / `docs/observability.md` for the
+new reference docs.
+
+```bash
+# Health check (fast — no network call; add --health-check-deep for one)
+python main.py --health-check
+
+# Structured JSON logs to stderr (auto-on when stdout isn't a TTY)
+ZCODER_LOG_FORMAT=json python main.py -p "..."
+
+# Run the test suite / lint / security scan
+pip install -r requirements-dev.txt
+make check          # or: pytest && ruff check . && bandit -r . -x ./tests
+
+# Container
+docker build -t zcoder .
+docker run --rm -e ANTHROPIC_API_KEY=sk-ant-... zcoder -p "hello"
+```
 
 ## New in v1.12.0 — standalone packaging (merged from ai-coder-cli-v2)
 
@@ -472,6 +711,9 @@ python main.py --batch-results <id>
 # Prompt Caching
 python main.py --cache -p "Question" --cache-docs large_doc.md
 python main.py --cache-warm --cache-docs docs/
+python main.py --cache -p "Question" --cache-diagnose            # v1.18.0: report why a cache read missed
+python main.py --cache --cache-multi-turn "Turn 1" "Turn 2" \
+    --cache-mid-system "Answer in bullet points from now on."     # v1.18.0: Opus 4.8 only
 
 # Tool Use (agentic loop)
 python main.py --tool-agent -p "Read all .py files and write a summary"
@@ -505,6 +747,8 @@ python main.py --list-models
 
 | Module | Purpose |
 |--------|---------|
+| `claude_skills_api.py` (NEW, v1.15.0) | Platform Agent Skills (`skill_id`-based); base client + `--excel-native`/`--pptx-native` primitives |
+| `claude_admin_api.py` (NEW, v1.15.0) | Admin API: Usage/Cost reporting, API key list/revoke (requires an Admin API key) |
 | `claude_mythos5.py` (NEW) | Claude Mythos 5: limited-access companion to claude_fable5.py, pointed access-gate error handling |
 | `claude_memory.py` (NEW) | Persistent cross-session memory: facts, preferences, events, tasks, retention policy |
 | `claude_sessions.py` (NEW) | Resumable sessions, named checkpoints/rewind, away-summary (repo activity while absent) |

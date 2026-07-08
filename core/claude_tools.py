@@ -1,6 +1,6 @@
 """
 claude_tools.py — Tool Use (Function Calling)
-AI Model Coder CLI v1.11.0
+AI Model Coder CLI v1.23.0
 
 Full tool-use support:
   • Custom tool definitions (JSON Schema)
@@ -29,12 +29,15 @@ Full tool-use support:
     marking on your own tool definitions is on you)
 
 Version-string / beta-header notes (checked against platform.claude.com/docs
-as of 2026-07-02 — re-verify before relying on this for production traffic,
+as of 2026-07-09 — re-verify before relying on this for production traffic,
 the same caveat claude_models.py already carries for model IDs):
-  • web_search bumped 20250305 -> 20260209 to match the current docs example.
-  • code_execution bumped 20250522 -> 20260120 — this is documented as the
-    minimum version for programmatic tool calling (adds REPL-state
-    persistence) and is now GA (no beta header needed to adopt it).
+  • web_search bumped 20260209 -> 20260318 to match the current docs example.
+    20260318 adds response_inclusion param (full|excluded).
+  • web_fetch bumped 20250124 -> 20260318 — closes version drift vs
+    claude_search.py. 20260318 adds use_cache and response_inclusion params.
+  • code_execution at 20260120 — this is the minimum version for programmatic
+    tool calling (adds REPL-state persistence) and is GA (no beta header
+    needed). code_execution_20260521 also available (newer, not yet default).
   • Programmatic tool calling itself still needs the advanced-tool-use-
     2025-11-20 beta header per the public cookbook / engineering post as of
     this check; only add it when a tool actually sets allowed_callers.
@@ -72,16 +75,19 @@ import urllib.request
 import urllib.error
 from typing import Optional, Callable
 
+from exceptions import AICoderError
+from resilience import CircuitBreaker, retry, urlopen_json
+
 
 # ── Built-in server tool descriptors ──────────────────────────────────────
 
 SERVER_TOOLS = {
     "web_search": {
-        "type": "web_search_20260209",
+        "type": "web_search_20260318",
         "name": "web_search",
     },
     "web_fetch": {
-        "type": "web_fetch_20250124",
+        "type": "web_fetch_20260318",
         "name": "web_fetch",
     },
     "code_execution": {
@@ -112,6 +118,36 @@ SERVER_TOOLS = {
     },
 }
 
+
+def build_web_search_tool(response_inclusion: Optional[str] = None) -> dict:
+    """Return a web_search tool descriptor, optionally with response_inclusion.
+
+    response_inclusion: "full" (default — nested tool result block returned)
+    or "excluded" (hidden when consumed by code_execution in the same turn,
+    reducing context window usage). Requires web_search_20260318+.
+    """
+    tool = dict(SERVER_TOOLS["web_search"])
+    if response_inclusion in ("full", "excluded"):
+        tool["response_inclusion"] = response_inclusion
+    return tool
+
+
+def build_web_fetch_tool(use_cache: Optional[bool] = None,
+                         response_inclusion: Optional[str] = None) -> dict:
+    """Return a web_fetch tool descriptor, optionally with use_cache and/or
+    response_inclusion.
+
+    use_cache: True (default, use cached content) or False (force fresh fetch).
+    response_inclusion: "full" or "excluded" — see build_web_search_tool().
+    Both require web_fetch_20260318+.
+    """
+    tool = dict(SERVER_TOOLS["web_fetch"])
+    if use_cache is not None:
+        tool["use_cache"] = use_cache
+    if response_inclusion in ("full", "excluded"):
+        tool["response_inclusion"] = response_inclusion
+    return tool
+
 # computer_use tool-version support is split by model generation. Current
 # models (Sonnet 5, Opus 4.8/4.7/4.6, Sonnet 4.6, Opus 4.5) take the newer
 # computer-use-2025-11-24 pairing; Sonnet 4.5 / Haiku 4.5 (and the retired
@@ -139,12 +175,28 @@ _COMPUTER_USE_2025_01_24_MODELS = {
 # add to this table rather than assuming silence means current.
 RETIRED_TOOL_VERSIONS: dict = {
     "web_search_20250305": {
-        "replacement": "web_search_20260209",
-        "notes": "Still works. 20260209 adds dynamic content filtering.",
+        "replacement": "web_search_20260318",
+        "notes": "Still works. 20260209 added dynamic content filtering; "
+                 "20260318 adds response_inclusion param.",
+    },
+    "web_search_20260209": {
+        "replacement": "web_search_20260318",
+        "notes": "Still works. 20260318 adds response_inclusion param.",
+    },
+    "web_fetch_20250124": {
+        "replacement": "web_fetch_20260318",
+        "notes": "Still works. 20260318 adds use_cache and response_inclusion "
+                 "params.",
     },
     "web_fetch_20250910": {
-        "replacement": "web_fetch_20260209",
-        "notes": "Still works. 20260209 adds dynamic content filtering.",
+        "replacement": "web_fetch_20260318",
+        "notes": "Still works. 20260318 adds use_cache and response_inclusion "
+                 "params.",
+    },
+    "web_fetch_20260209": {
+        "replacement": "web_fetch_20260318",
+        "notes": "Still works. 20260318 adds use_cache and response_inclusion "
+                 "params.",
     },
     "code_execution_20250522": {
         "replacement": "code_execution_20260120",
@@ -155,7 +207,8 @@ RETIRED_TOOL_VERSIONS: dict = {
         "replacement": "code_execution_20260120",
         "notes": "Both accepted interchangeably in allowed_callers per the "
                  "programmatic tool calling docs; 20260120 is the version "
-                 "server responses tag the caller field with regardless.",
+                 "server responses tag the caller field with regardless. "
+                 "code_execution_20260521 is also available (newer).",
     },
     "text_editor_20250124": {
         "replacement": "text_editor_20250728",
@@ -464,13 +517,18 @@ class ToolRegistry:
 class ToolCoder:
     """Claude client with full tool-use support."""
 
-    ENDPOINT = "http://192.168.74.128:20128/v1/messages"
+    ENDPOINT = "https://api.anthropic.com/v1/messages"
+    _breaker = CircuitBreaker(failure_threshold=5, reset_timeout=30)
 
     def __init__(self, api_key: str, model: str = "claude-sonnet-5",
                  max_tokens: int = 4096):
         self.api_key    = api_key
         self.model      = model
         self.max_tokens = max_tokens
+
+    @retry(max_attempts=4, base_delay=1.0, max_delay=15.0, breaker=_breaker)
+    def _call(self, req: "urllib.request.Request") -> dict:
+        return urlopen_json(req, timeout=120)
 
     def _post(self, payload: dict) -> dict:
         headers = {
@@ -485,10 +543,9 @@ class ToolCoder:
             method="POST",
         )
         try:
-            with urllib.request.urlopen(req, timeout=120) as r:
-                return json.loads(r.read().decode())
-        except urllib.error.HTTPError as e:
-            return {"error": e.read().decode(), "status": e.code}
+            return self._call(req)
+        except AICoderError as e:
+            return {"error": e.message, "status": getattr(e, "status_code", None)}
         except Exception as e:
             return {"error": str(e)}
 
@@ -670,10 +727,9 @@ class ToolCoder:
             method="POST",
         )
         try:
-            with urllib.request.urlopen(req, timeout=120) as r:
-                data = json.loads(r.read().decode())
-        except urllib.error.HTTPError as e:
-            return f"[API ERROR {e.code}] {e.read().decode()}"
+            data = self._call(req)
+        except AICoderError as e:
+            return f"[API ERROR {getattr(e, 'status_code', '')}] {e.message}"
 
         return "".join(
             b.get("text", "") for b in data.get("content", [])
@@ -725,10 +781,9 @@ class ToolCoder:
                 headers=headers, method="POST",
             )
             try:
-                with urllib.request.urlopen(req, timeout=120) as r:
-                    data = json.loads(r.read().decode())
-            except urllib.error.HTTPError as e:
-                return f"[API ERROR {e.code}] {e.read().decode()}"
+                data = self._call(req)
+            except AICoderError as e:
+                return f"[API ERROR {getattr(e, 'status_code', '')}] {e.message}"
 
             stop_reason = data.get("stop_reason", "")
             content     = data.get("content", [])

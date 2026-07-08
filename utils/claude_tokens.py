@@ -18,8 +18,11 @@ import urllib.error
 from pathlib import Path
 from typing import Optional
 
+from exceptions import AICoderError
+from resilience import CircuitBreaker, retry, urlopen_json
 
-COUNT_ENDPOINT = "http://192.168.74.128:20128/v1/messages/count_tokens"
+COUNT_ENDPOINT = "https://api.anthropic.com/v1/messages/count_tokens"
+_breaker = CircuitBreaker(failure_threshold=5, reset_timeout=30)
 
 
 class TokenCounter:
@@ -52,10 +55,13 @@ class TokenCounter:
             method="POST",
         )
         try:
-            with urllib.request.urlopen(req, timeout=30) as r:
-                return json.loads(r.read().decode())
-        except urllib.error.HTTPError as e:
-            raise RuntimeError(f"Token count failed [{e.code}]: {e.read().decode()}")
+            return self._call(req)
+        except AICoderError as e:
+            raise RuntimeError(f"Token count failed: {e.message}") from e
+
+    @retry(max_attempts=4, base_delay=1.0, max_delay=15.0, breaker=_breaker)
+    def _call(self, req: "urllib.request.Request") -> dict:
+        return urlopen_json(req, timeout=30)
 
     def count_file(self, file_path: str, prompt: str,
                    system: Optional[str] = None) -> dict:

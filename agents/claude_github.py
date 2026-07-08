@@ -15,7 +15,7 @@ CLI flags:
   --gh-max-items N              Max issues/commits to process (default: 20)
 """
 
-from core.utils import sampling_kwargs
+from utils import sampling_kwargs
 
 import json
 import os
@@ -24,9 +24,17 @@ import urllib.error
 from typing import Optional
 import anthropic
 
+from exceptions import AICoderError
+from resilience import CircuitBreaker, retry, urlopen_json, urlopen_text
+
 GITHUB_API = "https://api.github.com"
+# Shared across all GitHub call sites in this module (issues, PRs, commits,
+# diffs) — they're all the same downstream dependency, so repeated GitHub
+# outages/rate-limiting should trip one breaker rather than one per call site.
+_breaker = CircuitBreaker(failure_threshold=5, reset_timeout=30)
 
 
+@retry(max_attempts=4, base_delay=1.0, max_delay=15.0, breaker=_breaker)
 def _gh_get(path: str, token: str) -> dict | list:
     url = f"{GITHUB_API}{path}"
     req = urllib.request.Request(url, headers={
@@ -36,10 +44,23 @@ def _gh_get(path: str, token: str) -> dict | list:
         "User-Agent": "ai-coder-cli/1.9.1",
     })
     try:
-        with urllib.request.urlopen(req, timeout=20) as r:
-            return json.loads(r.read().decode())
-    except urllib.error.HTTPError as e:
-        raise RuntimeError(f"GitHub API error {e.code}: {e.read().decode()[:400]}")
+        return urlopen_json(req, timeout=20)
+    except AICoderError as e:
+        raise RuntimeError(f"GitHub API error: {e.message}") from e
+
+
+@retry(max_attempts=4, base_delay=1.0, max_delay=15.0, breaker=_breaker)
+def _gh_fetch_diff(diff_url: str, token: str, max_chars: int) -> str:
+    """Fetch a PR diff. Was previously inlined (and unretried/unhandled) at
+    both of review_pr()'s and generate_pr_description()'s call sites."""
+    req = urllib.request.Request(diff_url, headers={
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/vnd.github.diff",
+    })
+    try:
+        return urlopen_text(req, timeout=30)[:max_chars]
+    except AICoderError as e:
+        raise RuntimeError(f"GitHub diff fetch error: {e.message}") from e
 
 
 def _gh_token(explicit: Optional[str]) -> str:
@@ -67,13 +88,7 @@ def review_pr(repo: str, pr_number: int,
               gh_token: str, client: anthropic.Anthropic, model: str) -> str:
     pr = _gh_get(f"/repos/{repo}/pulls/{pr_number}", gh_token)
     diff_url = pr.get("diff_url", "")
-    # Fetch the actual diff
-    req = urllib.request.Request(diff_url, headers={
-        "Authorization": f"Bearer {gh_token}",
-        "Accept": "application/vnd.github.diff",
-    })
-    with urllib.request.urlopen(req, timeout=30) as r:
-        diff = r.read().decode(errors="replace")[:15000]
+    diff = _gh_fetch_diff(diff_url, gh_token, 15000)
 
     context = (
         f"PR #{pr_number}: {pr.get('title', '')}\n"
@@ -127,12 +142,7 @@ def summarise_commits(repo: str, max_items: int,
 def generate_pr_description(repo: str, pr_number: int,
                              gh_token: str, client: anthropic.Anthropic, model: str) -> str:
     pr = _gh_get(f"/repos/{repo}/pulls/{pr_number}", gh_token)
-    req = urllib.request.Request(pr.get("diff_url", ""), headers={
-        "Authorization": f"Bearer {gh_token}",
-        "Accept": "application/vnd.github.diff",
-    })
-    with urllib.request.urlopen(req, timeout=30) as r:
-        diff = r.read().decode(errors="replace")[:12000]
+    diff = _gh_fetch_diff(pr.get("diff_url", ""), gh_token, 12000)
     return _call(client, model,
                  "Write a clear, concise PR description in Markdown. Include: "
                  "## Summary, ## Changes, ## Testing, ## Notes. "
