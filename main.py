@@ -12,13 +12,21 @@ import os
 import sys
 from pathlib import Path
 
+# Structured repo layout: add subdirectories to sys.path so flat imports work.
+# In the upstream repo, modules live in core/, api/, agents/, utils/.
+_root = os.path.dirname(os.path.abspath(__file__))
+for _subdir in ("core", "api", "agents", "utils"):
+    _path = os.path.join(_root, _subdir)
+    if os.path.isdir(_path) and _path not in sys.path:
+        sys.path.insert(0, _path)
+
 # Both are tiny, dependency-free dicts (no urllib/API calls at import time),
 # so importing them eagerly to build argparse `choices=` is cheap and keeps
 # the CLI's advertised choices in sync with the actual data instead of a
 # second hardcoded list drifting from it.
 from personalities import PERSONALITIES
 
-VERSION = "1.22.0"
+VERSION = "1.23.0"
 BANNER  = f"\033[94mAI Model Coder CLI v{VERSION}\033[0m"
 
 # Named agent roles. Previously these seven names only existed as a
