@@ -35,3 +35,65 @@ openpyxl>=3.1.0
 python-pptx>=0.6.23
 
 # --browse (v1.15.0) needs no extra deps: urllib + html.parser, both stdlib.
+
+
+# ── Security pins (Dependabot 2026-07-09, 44 alerts) ──────────────────────
+# All transitive dependencies with known CVEs pinned to their minimum
+# patched versions. These are not directly imported by the project but
+# are pulled in transitively by anthropic, pandas, python-pptx, etc.
+
+# cryptography: 6 alerts (OpenSSL in wheels, NULL ptr, subgroup attack,
+# Bleichenbacher timing oracle, PKCS12, DNS name constraint)
+cryptography>=48.0.1
+
+# PyJWT: 4 alerts (SSRF via file://, HMAC secret forgery, unknown crit
+# headers, unbounded JWKS requests)
+PyJWT>=2.13.0
+
+# urllib3: 6 alerts (sensitive header forwarding, decompression bomb,
+# streaming compression, unbounded link chains, redirect handling,
+# Proxy-Authorization leak)
+urllib3>=2.7.0
+
+# requests: 3 alerts (insecure temp file, .netrc credential leak,
+# verify=False persistence)
+requests>=2.33.0
+
+# pillow: 3 alerts (PDF trailer loop, font integer overflow, buffer overflow)
+pillow>=12.2.0
+
+# setuptools: 2 alerts (path traversal in PackageIndex, command injection
+# via package URL)
+setuptools>=78.1.1
+
+# Jinja2: 4 alerts (sandbox breakout via attr filter, malicious filenames,
+# indirect format reference, HTML attribute injection)
+Jinja2>=3.1.6
+
+# idna: 2 alerts (crafted input crash, DoS from specially crafted input)
+idna>=3.15
+
+# pyOpenSSL: 2 alerts (DTLS cookie callback buffer overflow, TLS connection
+# bypass via unhandled callback exception)
+pyOpenSSL>=26.0.0
+
+# pyasn1: 1 alert (DoS via unbounded recursion)
+pyasn1>=0.6.3
+
+# pytest: 1 alert (vulnerable tmpdir handling)
+pytest>=9.0.3
+
+# Pygments: 1 alert (ReDoS via inefficient GUID regex)
+Pygments>=2.20.0
+
+# Markdown: 1 alert (uncaught exception)
+Markdown>=3.8.1
+
+# wheel: 1 alert (path traversal in wheel unpack)
+wheel>=0.46.2
+
+# configobj: 1 alert (ReDoS in config values)
+configobj>=5.0.9
+
+# certifi: 1 alert (GLOBALTRUST root certificate removal)
+certifi>=2024.7.4
