@@ -1,0 +1,32 @@
+# UTF-8
+#
+# Windows version resource for ZAI Coder CLI
+# Used by PyInstaller to embed version info in the .exe
+#
+VSVersionInfo(
+  ffi=FixedFileInfo(
+    filevers=(1, 23, 0, 0),
+    prodvers=(1, 23, 0, 0),
+    mask=0x3f,
+    flags=0x0,
+    OS=0x40004,
+    fileType=0x1,
+    subtype=0x0,
+    date=(0, 0)
+  ),
+  kids=[
+    StringFileInfo(
+      [
+      StringTable(
+        u'040904B0',
+        [StringStruct(u'CompanyName', u'ZeaZDev'),
+        StringStruct(u'FileDescription', u'ZAI Coder CLI — AI-powered coding assistant'),
+        StringStruct(u'FileVersion', u'1.23.0.0'),
+        StringStruct(u'InternalName', u'zai-coder'),
+        StringStruct(u'LegalCopyright', u'Copyright (c) 2026 ZeaZDev'),
+        StringStruct(u'OriginalFilename', u'zai-coder.exe'),
+        StringStruct(u'ProductName', u'ZAI Coder'),
+        StringStruct(u'ProductVersion', u'1.23.0')])
+      ])
+  ]
+)
