@@ -12,21 +12,13 @@ import os
 import sys
 from pathlib import Path
 
-# Structured repo layout: add subdirectories to sys.path so flat imports work.
-# In the upstream repo, modules live in core/, api/, agents/, utils/.
-_root = os.path.dirname(os.path.abspath(__file__))
-for _subdir in ("core", "api", "agents", "utils"):
-    _path = os.path.join(_root, _subdir)
-    if os.path.isdir(_path) and _path not in sys.path:
-        sys.path.insert(0, _path)
-
 # Both are tiny, dependency-free dicts (no urllib/API calls at import time),
 # so importing them eagerly to build argparse `choices=` is cheap and keeps
 # the CLI's advertised choices in sync with the actual data instead of a
 # second hardcoded list drifting from it.
 from personalities import PERSONALITIES
 
-VERSION = "1.23.0"
+VERSION = "1.22.0"
 BANNER  = f"\033[94mAI Model Coder CLI v{VERSION}\033[0m"
 
 # Named agent roles. Previously these seven names only existed as a
@@ -88,6 +80,8 @@ def build_parser():
     g.add_argument("--max-tokens", type=int, default=4096, dest="max_tokens")
     g.add_argument("--api-key", default="", dest="api_key")
     g.add_argument("--version", action="store_true")
+    g.add_argument("--tui", action="store_true",
+                   help="Launch the Master Omega TUI (interactive terminal UI)")
     g.add_argument("--service-tier", choices=["auto", "standard_only"], default=None,
                    dest="service_tier",
                    help="Priority Tier routing (requires an existing capacity "
@@ -849,6 +843,10 @@ def main():
 
     if args.version:
         print(BANNER); return
+
+    if args.tui:
+        from tui import launch_tui
+        launch_tui(api_key=key, model=model); return
 
     if getattr(args, "health_check", False):
         import json as _json

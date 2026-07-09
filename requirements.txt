@@ -97,3 +97,6 @@ configobj>=5.0.9
 
 # certifi: 1 alert (GLOBALTRUST root certificate removal)
 certifi>=2024.7.4
+
+# TUI — Master Omega Advance Professional TUI (v1.23.0)
+textual>=8.0.0
