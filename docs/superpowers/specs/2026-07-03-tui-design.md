@@ -1,9 +1,9 @@
-# Design Spec: TUI Full Feature for ai-coder-cli
+# Design Spec: TUI Full Feature for zai-coder-cli
 Date: 2026-07-03
 Status: Draft (Pending User Review)
 
 ## 1. Overview
-The goal is to transform `ai-coder-cli` from a purely command-line interface into a rich, interactive Text User Interface (TUI). This will improve the user experience by providing real-time feedback, a structured dashboard for monitoring agent activity, and a more intuitive way to interact with the AI.
+The goal is to transform `zai-coder-cli` from a purely command-line interface into a rich, interactive Text User Interface (TUI). This will improve the user experience by providing real-time feedback, a structured dashboard for monitoring agent activity, and a more intuitive way to interact with the AI.
 
 ## 2. Architecture & Technical Approach
 

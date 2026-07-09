@@ -1,9 +1,9 @@
 #!/bin/bash
-# Setup script for AI Model Coder CLI
+# Setup script for ZAI Coder CLI
 
 set -e
 
-echo "🚀 AI Model Coder CLI Setup"
+echo "🚀 ZAI Coder CLI Setup"
 echo "================================"
 echo ""
 

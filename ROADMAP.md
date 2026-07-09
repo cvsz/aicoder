@@ -1,13 +1,13 @@
 # ROADMAP.md
 
-**AI Model Coder CLI (zcoder) — v1.20.0**
+**ZAI Coder CLI (zaicoder) — v1.20.0**
 Last audited against `platform.claude.com/docs`: 2026-07-08
 
 This roadmap has two parts:
 
-1. **Where zcoder stands today** — a full inventory of what's implemented,
+1. **Where zaicoder stands today** — a full inventory of what's implemented,
    module by module, mapped to the Anthropic feature it covers.
-2. **What's missing** — every gap found by cross-referencing zcoder against
+2. **What's missing** — every gap found by cross-referencing zaicoder against
    the live Features overview and API reference at platform.claude.com/docs,
    with a concrete implementation plan for each one, ranked by priority.
 
@@ -197,7 +197,7 @@ round trip — no second HTTP call from the client.
 implemented the *client-side manual* pattern (a second, separate `_post()`
 call to `self.fallback_model`). That's a legitimate documented pattern
 too, but it's a different one from the `fallbacks` param, and at the time
-zcoder only had the manual path.
+zaicoder only had the manual path.
 
 **What changed:** `Fable5Client` now takes a `fallback_chain` param; when
 set, `call()` sends `payload["fallbacks"] = fallback_chain` and reads back
@@ -354,13 +354,13 @@ beta header (in addition to `managed-agents-2026-04-01`).
 touched a `memory_stores` endpoint, and `create_session` never sent a
 `resources` param at all.
 
-**Why P1, not P2:** without it, every Managed Agents session in zcoder is
+**Why P1, not P2:** without it, every Managed Agents session in zaicoder is
 necessarily stateless past the one throwaway session `cmd_managed_agent_run`
 creates — there's no supported way for a hosted agent's work to survive
 into a second session. That's a capability gap for the CLI's stated use
 case (multi-session agentic coding), not just an admin/reporting nicety.
 
-**Why this isn't a duplicate of existing "memory" features:** zcoder
+**Why this isn't a duplicate of existing "memory" features:** zaicoder
 already has two other things called "memory" — `claude_memory.py`'s
 `memory_20250818` client-side tool, and Claude Code's local
 `.claude`/`MEMORY.md` auto-memory. Both are real, different features, not
@@ -500,10 +500,10 @@ that the lead agent can "check back in with... mid-workflow." Building
 a faithful wrapper means designing how `claude_agents_sdk.py` exposes
 per-subagent model/prompt/tool configuration and multi-thread event
 handling, which is a meaningfully larger surface than the other three
-gaps closed this cycle, and zcoder doesn't yet have a concrete
+gaps closed this cycle, and zaicoder doesn't yet have a concrete
 multi-subagent-in-one-session use case to build it against (the
 existing `--agent-orchestrate` already covers "decompose a goal into
-independent subtasks" for zcoder's actual usage patterns). Same
+independent subtasks" for zaicoder's actual usage patterns). Same
 reasoning the Compliance API used between v1.15.0 and v1.16.0.
 
 **Exit condition:** revisit if there's an actual concrete need for
@@ -659,7 +659,7 @@ implemented and tested, not just planned.
 
 This audit was produced by fetching the live Features overview and API
 reference from `platform.claude.com/docs` (checked 2026-07-08) and grepping
-the zcoder source tree for the concrete API surface of each feature —
+the zaicoder source tree for the concrete API surface of each feature —
 parameter names (`fallbacks`, `skill_id`, `clear_tool_uses`, `diagnostics`,
 `role: "system"`), endpoint paths, and beta header strings — rather than
 trusting module docstrings or README changelog entries at face value.

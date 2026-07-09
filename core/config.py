@@ -1,7 +1,7 @@
 """config.py — Configuration management"""
 import os, json
 
-CONFIG_PATH = os.path.expanduser("~/.ai-coder-config.json")
+CONFIG_PATH = os.path.expanduser("~/.zaicoder-config.json")
 
 class Config:
     def __init__(self):

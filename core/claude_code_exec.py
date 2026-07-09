@@ -1,6 +1,6 @@
 """
 claude_code_exec.py — Code Execution Tool (beta)
-AI Model Coder CLI v1.8.0
+ZAI Coder CLI v1.8.0
 
 Let Claude write AND run Python code in a secure Anthropic-hosted sandbox.
 Results (stdout, files, images) are returned inline.

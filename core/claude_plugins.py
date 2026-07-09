@@ -1,6 +1,6 @@
 """
 claude_plugins.py — Plugin & Marketplace system
-AI Model Coder CLI v1.9.0
+ZAI Coder CLI v1.9.0
 
 Models Claude Code's plugin system (docs.claude.com/plugins-reference):
 

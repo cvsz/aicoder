@@ -1,6 +1,6 @@
 """
 claude_agents.py — Claude Agent SDK / Managed Agents
-AI Model Coder CLI v1.23.0
+ZAI Coder CLI v1.23.0
 
 Implements the Claude Agent SDK patterns:
   • Stateful sessions with persistent event history
@@ -137,7 +137,7 @@ from exceptions import AICoderError
 from resilience import CircuitBreaker, raise_for_http_error, retry, urlopen_json
 
 
-SESSIONS_DIR = Path(os.path.expanduser("~/.ai-coder/agent_sessions"))
+SESSIONS_DIR = Path(os.path.expanduser("~/.zaicoder/agent_sessions"))
 ENDPOINT     = "https://api.anthropic.com/v1/messages"
 _breaker = CircuitBreaker(failure_threshold=5, reset_timeout=30)
 
@@ -597,7 +597,7 @@ def build_multiagent_config(agents: list) -> dict:
 
 # Small built-in system-prompt presets for the --agent-review-multiagent
 # CLI convenience wrapper (parallel specialist code review over one shared
-# sandbox — the concrete zcoder use case that un-deferred Multiagent
+# sandbox — the concrete zaicoder use case that un-deferred Multiagent
 # orchestration this cycle; see docs/35_upgrade_v1.21.0.md).
 REVIEW_SPECIALIST_PRESETS = {
     "security": (
@@ -1124,8 +1124,8 @@ def cmd_managed_agent_run(task: str, api_key: str, model: str = "claude-opus-4-8
     secret — see ManagedAgentsClient.create_vault()/add_credential()."""
     mac = ManagedAgentsClient(api_key)
     print("\033[94mℹ Creating Managed Agent, environment, and session…\033[0m")
-    agent = mac.create_agent(name=f"ai-coder-task-{uuid.uuid4().hex[:8]}", model=model)
-    env   = mac.create_environment(name=f"ai-coder-env-{uuid.uuid4().hex[:8]}")
+    agent = mac.create_agent(name=f"zai-coder-task-{uuid.uuid4().hex[:8]}", model=model)
+    env   = mac.create_environment(name=f"zai-coder-env-{uuid.uuid4().hex[:8]}")
     store_id = None
     if memory_store:
         store = mac.create_memory_store(name=memory_store)
@@ -1174,7 +1174,7 @@ def cmd_agent_vault_create(display_name: str, api_key: str,
     mac = ManagedAgentsClient(api_key)
     vault = mac.create_vault(display_name=display_name, external_user_id=external_user_id)
     print(f"\033[92m✓ vault created\033[0m  id={vault['id']}  display_name={display_name}")
-    print(f"  Add a credential: ai-coder --agent-vault-add-credential {vault['id']} "
+    print(f"  Add a credential: zzai-coder --agent-vault-add-credential {vault['id']} "
           f"--agent-vault-cred-type static_bearer --agent-vault-mcp-url URL --agent-vault-secret TOKEN")
     return vault
 
@@ -1217,7 +1217,7 @@ def cmd_agent_dream(store_id: str, api_key: str, model: str = "claude-opus-4-8",
     mac = ManagedAgentsClient(api_key)
     dream = mac.create_dream(store_id, session_ids=session_ids, model=model, instructions=instructions)
     print(f"\033[92m✓ dream started\033[0m  id={dream['id']}  status={dream['status']}")
-    print(f"\033[90m  Poll: ai-coder --agent-dream-get {dream['id']}\033[0m")
+    print(f"\033[90m  Poll: zzai-coder --agent-dream-get {dream['id']}\033[0m")
     return dream
 
 
@@ -1370,7 +1370,7 @@ def cmd_agent_review_multiagent(path: str, specialists: list, api_key: str,
         system=coordinator_system,
         multiagent=build_multiagent_config(specialist_ids),
     )
-    env  = mac.create_environment(name=f"ai-coder-review-env-{uuid.uuid4().hex[:8]}")
+    env  = mac.create_environment(name=f"zai-coder-review-env-{uuid.uuid4().hex[:8]}")
     sess = mac.create_session(coordinator["id"], env["id"],
                               title=f"multiagent review: {path}"[:60])
     print(f"\033[92m✓ session {sess['id']}\033[0m — running review…\n")
@@ -1396,7 +1396,7 @@ def cmd_agent_outcome_rubric_upload(file_path: str, api_key: str, model: str) ->
     print(f"\033[94mℹ Uploading rubric {file_path}…\033[0m")
     result = fa.upload(file_path)
     print(f"\033[92m✓ rubric uploaded\033[0m  file_id={result['id']}")
-    print(f"  Reuse with: ai-coder --agent-managed-run \"...\" --agent-outcome \"...\" "
+    print(f"  Reuse with: zzai-coder --agent-managed-run \"...\" --agent-outcome \"...\" "
           f"--agent-outcome-rubric-file {result['id']}")
     return result["id"]
 
@@ -1420,7 +1420,7 @@ def cmd_agent_chat(prompt: str, api_key: str, model: str,
     result = agent.chat(prompt, session)
     print(result)
     print(f"\n\033[90m[session: {session.id}  turns: {len(session.history)//2}]\033[0m")
-    print(f"\033[90m  Resume: ai-coder --agent-session {session.id} -p \"follow-up\"\033[0m")
+    print(f"\033[90m  Resume: zzai-coder --agent-session {session.id} -p \"follow-up\"\033[0m")
     return result
 
 

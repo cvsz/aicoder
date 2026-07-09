@@ -10,6 +10,8 @@ SKILLS = [
     {"name": "optimization",       "description": "Improve performance and efficiency"},
     {"name": "security",           "description": "Security audit and vulnerability review"},
     {"name": "file_management",    "description": "Organise and process files"},
+    {"name": "spreadsheet_analysis","description": "Build financial models, clean messy data, "
+                                                    "and create tables/charts (see --excel)"},
     {"name": "api_design",         "description": "Design clean REST/GraphQL APIs"},
     {"name": "voice",              "description": "Generate voice/TTS scripts (gTTS/ElevenLabs)"},
     {"name": "video",              "description": "Generate video production scripts (MoviePy/FFmpeg)"},

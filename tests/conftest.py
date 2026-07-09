@@ -1,19 +1,18 @@
-"""tests/conftest.py — shared fixtures for structured repo layout.
+"""tests/conftest.py — shared fixtures"""
+import os
+import sys
 
-The upstream repo organizes modules into subdirectories (core/, api/,
-agents/, utils/) but tests use flat imports. The root conftest.py adds
-all subdirectories to sys.path so flat imports resolve correctly.
-"""
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 import pytest
 
 
 @pytest.fixture(autouse=True)
 def isolated_config(tmp_path, monkeypatch):
     """Every test gets its own config file path so tests never read/write
-    a real ~/.ai-coder-config.json on the machine running the suite."""
-    fake_config = tmp_path / ".ai-coder-config.json"
-    import config
-    monkeypatch.setattr(config, "CONFIG_PATH", str(fake_config))
+    a real ~/.zaicoder-config.json on the machine running the suite."""
+    fake_config = tmp_path / ".zaicoder-config.json"
+    monkeypatch.setattr("config.CONFIG_PATH", str(fake_config))
     yield fake_config
 
 

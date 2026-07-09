@@ -47,7 +47,7 @@ from exceptions import (
     TransientAPIError,
 )
 
-logger = logging.getLogger("zcoder.resilience")
+logger = logging.getLogger("zaicoder.resilience")
 
 T = TypeVar("T")
 

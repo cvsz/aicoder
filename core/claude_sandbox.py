@@ -1,129 +1,163 @@
 """
-claude_sandbox.py — Sandboxed Bash execution
-AI Model Coder CLI v1.9.0
+claude_metrics.py — Observability & Usage Metrics
+ZAI Coder CLI v1.9.1
 
-Models Claude Code's sandboxed Bash tool: OS-level-style filesystem and
-network isolation enforced around shell commands the agent runs, without
-needing a prompt/approval round-trip for every command inside the
-sandbox boundary.
-
-This is a best-effort, portable sandbox (no kernel namespaces — those
-aren't available in every environment this CLI runs in). It enforces:
-  • filesystem: commands may only touch paths under one or more
-    allowed roots (default: the session cwd); writes outside are blocked
-    pre-execution by static inspection of the command for common file-
-    redirection / mutation patterns plus a post-hoc cwd jail via subprocess cwd.
-  • network: when network is disabled, common networking binaries/flags
-    are blocked before exec (curl, wget, nc, ssh, scp, http clients,
-    python -m http.server, pip/npm install which hit the network, etc.)
-
-This is defense-in-depth for an agent that already passes every tool
-call through PreToolUse hooks and permission gating — it is not a
-substitute for a real OS sandbox (containers, seccomp, firejail) when
-running fully untrusted code.
+Tracks every API call (model, tokens, cost, latency) to a local JSONL
+log so you can understand spend, compare models, and spot regressions.
 
 CLI flags:
-  --code-agent-sandbox                 enable sandboxed Bash
-  --code-agent-sandbox-allow-net       allow network calls inside the sandbox
-  --code-agent-sandbox-roots PATH...   additional allowed filesystem roots
+  --metrics-show          Show usage summary across all logged calls
+  --metrics-today         Show only today's usage
+  --metrics-model MODEL   Filter summary to one model
+  --metrics-clear         Clear the metrics log
+  --metrics-export FILE   Export full log to FILE as JSON
 """
 
-import re
-import shlex
+import json
+import os
+import time
 from pathlib import Path
+from datetime import datetime, date
 from typing import Optional
 
-NETWORK_BINARIES = {
-    "curl", "wget", "nc", "ncat", "netcat", "ssh", "scp", "sftp", "rsync",
-    "telnet", "ftp", "http", "https", "wormhole", "ngrok",
+LOG_PATH = Path(os.path.expanduser("~/.zaicoder/metrics.jsonl"))
+
+# Pricing per million tokens (keep in sync with claude_fable5.py)
+# Pricing per million tokens (keep in sync with claude_cost_optimizer.py).
+# Verified against platform.claude.com/docs/en/about-claude/models/overview
+# as of 2026-07-02. Sonnet 5 has $2/$10 intro pricing through 2026-08-31 —
+# not modeled here; this table uses the standing post-intro rate.
+PRICE_TABLE = {
+    "claude-fable-5":               (10.0, 50.0),
+    "claude-mythos-5":              (10.0, 50.0),
+    "claude-opus-4-8":               (5.0, 25.0),
+    "claude-sonnet-5":                (3.0, 15.0),
+    "claude-haiku-4-5-20251001":      (1.0,  5.0),
+    # Legacy — still callable
+    "claude-opus-4-7":               (5.0, 25.0),
+    "claude-opus-4-6":               (5.0, 25.0),
+    "claude-opus-4-5":               (5.0, 25.0),
+    "claude-sonnet-4-6":              (3.0, 15.0),
+    "claude-sonnet-4-5":              (3.0, 15.0),
 }
-NETWORK_PIP_NPM_FLAGS = {
-    "pip": {"install", "download"},
-    "pip3": {"install", "download"},
-    "npm": {"install", "i", "ci", "update", "publish"},
-    "npx": set(),  # npx can fetch packages by default; flag the bare command
-    "yarn": {"add", "install", "upgrade"},
-    "git": {"clone", "fetch", "pull", "push"},
-}
+DEFAULT_PRICE = (3.0, 15.0)
 
 
-class SandboxViolation(Exception):
-    pass
+def _price(model: str, input_tok: int, output_tok: int) -> float:
+    p_in, p_out = PRICE_TABLE.get(model, DEFAULT_PRICE)
+    return input_tok / 1_000_000 * p_in + output_tok / 1_000_000 * p_out
 
 
-def _tokenize(command: str) -> list:
-    try:
-        return shlex.split(command)
-    except ValueError:
-        return command.split()
+def record(model: str, input_tokens: int, output_tokens: int,
+           latency_seconds: float, command: str = "", stop_reason: str = ""):
+    """Append one call record to the JSONL log.
+
+    v1.11.0: on the Claude API, a request that returns stop_reason:"refusal"
+    with no generated output is documented as not billed. Previously this
+    function always priced input_tokens + output_tokens regardless of
+    stop_reason, which overstated cost for refusals — Anthropic doesn't
+    charge for them, so this log shouldn't either. Pass stop_reason through
+    from the caller (see claude_fable5.py's call_with_fallback(), which now
+    surfaces not_billed for exactly this case) to get an accurate $0 entry
+    instead of a phantom charge."""
+    LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    not_billed = stop_reason == "refusal" and output_tokens == 0
+    entry = {
+        "ts": datetime.utcnow().isoformat() + "Z",
+        "model": model,
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
+        "cost_usd": 0.0 if not_billed else round(_price(model, input_tokens, output_tokens), 6),
+        "latency_seconds": round(latency_seconds, 3),
+        "command": command,
+        "stop_reason": stop_reason,
+        "not_billed": not_billed,
+    }
+    with open(LOG_PATH, "a") as f:
+        f.write(json.dumps(entry) + "\n")
 
 
-def check_network(command: str) -> Optional[str]:
-    """Return a violation message if the command looks like a network call, else None."""
-    tokens = _tokenize(command)
-    if not tokens:
-        return None
-
-    for i, tok in enumerate(tokens):
-        base = Path(tok).name
-        if base in NETWORK_BINARIES:
-            return f"network binary '{base}' is blocked inside the sandbox (run with --code-agent-sandbox-allow-net to permit)"
-        if base in NETWORK_PIP_NPM_FLAGS:
-            sub_flags = NETWORK_PIP_NPM_FLAGS[base]
-            rest = set(tokens[i + 1:i + 2])
-            if not sub_flags or rest & sub_flags:
-                return f"'{base}' network operation is blocked inside the sandbox"
-        if base == "python" or base == "python3":
-            joined = " ".join(tokens[i:i + 3])
-            if "http.server" in joined or "urllib" in joined:
-                return "python network access is blocked inside the sandbox"
-
-    # Catch protocol URLs anywhere in the command line as a backstop
-    if re.search(r"https?://|ftp://|ssh://", command):
-        return "command contains a network URL, blocked inside the sandbox"
-    return None
+def load_log(today_only: bool = False, model_filter: Optional[str] = None) -> list[dict]:
+    if not LOG_PATH.exists():
+        return []
+    today_str = date.today().isoformat()
+    entries = []
+    with open(LOG_PATH) as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                e = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if today_only and not e.get("ts", "").startswith(today_str):
+                continue
+            if model_filter and e.get("model") != model_filter:
+                continue
+            entries.append(e)
+    return entries
 
 
-def check_filesystem(command: str, allowed_roots: list) -> Optional[str]:
-    """
-    Best-effort static check: flag absolute paths or '..' traversal outside
-    the allowed roots when they appear as redirection targets or common
-    mutation-command arguments. Not a full parser — defense in depth only.
-    """
-    allowed = [Path(r).resolve() for r in allowed_roots]
+def summarise(entries: list[dict]) -> dict:
+    if not entries:
+        return {"calls": 0}
+    by_model: dict[str, dict] = {}
+    for e in entries:
+        m = e.get("model", "unknown")
+        if m not in by_model:
+            by_model[m] = {"calls": 0, "input_tokens": 0, "output_tokens": 0,
+                           "cost_usd": 0.0, "latency_seconds": 0.0}
+        s = by_model[m]
+        s["calls"] += 1
+        s["input_tokens"] += e.get("input_tokens", 0)
+        s["output_tokens"] += e.get("output_tokens", 0)
+        s["cost_usd"] += e.get("cost_usd", 0.0)
+        s["latency_seconds"] += e.get("latency_seconds", 0.0)
+    for m in by_model:
+        s = by_model[m]
+        s["avg_latency_seconds"] = round(s["latency_seconds"] / s["calls"], 3)
+        s["cost_usd"] = round(s["cost_usd"], 6)
 
-    def _is_allowed(p: str) -> bool:
-        try:
-            resolved = Path(p).expanduser().resolve()
-        except Exception:
-            return True  # don't block on unparseable paths
-        return any(resolved == root or root in resolved.parents for root in allowed)
-
-    # Redirection targets: > file, >> file
-    for m in re.finditer(r"(?:>>?)\s*([^\s|&;]+)", command):
-        target = m.group(1)
-        if (target.startswith("/") or target.startswith("~")) and not _is_allowed(target):
-            return f"redirect target '{target}' is outside the sandbox root(s)"
-
-    # rm -rf / mv / cp targeting absolute paths outside roots
-    for m in re.finditer(r"\b(rm|mv|cp)\b[^|;&]*", command):
-        for path_tok in re.findall(r"(?:^|\s)(/[^\s]+|~[^\s]*)", m.group(0)):
-            if not _is_allowed(path_tok):
-                return f"'{m.group(1)}' targets '{path_tok}' outside the sandbox root(s)"
-
-    return None
+    return {
+        "calls": len(entries),
+        "total_cost_usd": round(sum(e.get("cost_usd", 0) for e in entries), 6),
+        "total_input_tokens": sum(e.get("input_tokens", 0) for e in entries),
+        "total_output_tokens": sum(e.get("output_tokens", 0) for e in entries),
+        "by_model": by_model,
+    }
 
 
-def enforce(command: str, cwd: str, allow_net: bool = False,
-            extra_roots: Optional[list] = None) -> None:
-    """Raise SandboxViolation if the command violates sandbox policy."""
-    roots = [cwd] + (extra_roots or [])
+def cmd_metrics_show(today_only: bool = False, model_filter: Optional[str] = None):
+    entries = load_log(today_only=today_only, model_filter=model_filter)
+    s = summarise(entries)
+    if not s.get("calls"):
+        print("No metrics recorded yet. API calls are logged automatically after each use.")
+        return
+    label = "Today's" if today_only else "All-time"
+    if model_filter:
+        label += f" [{model_filter}]"
+    print(f"\n\033[94m{label} Usage\033[0m")
+    print(f"  Total calls:    {s['calls']}")
+    print(f"  Total cost:     ${s['total_cost_usd']:.4f}")
+    print(f"  Input tokens:   {s['total_input_tokens']:,}")
+    print(f"  Output tokens:  {s['total_output_tokens']:,}")
+    if s.get("by_model"):
+        print(f"\n  \033[1mBy model:\033[0m")
+        for model, ms in sorted(s["by_model"].items()):
+            print(f"    {model:<40} {ms['calls']} calls  "
+                  f"${ms['cost_usd']:.4f}  avg {ms['avg_latency_seconds']}s")
+    print()
 
-    if not allow_net:
-        violation = check_network(command)
-        if violation:
-            raise SandboxViolation(violation)
 
-    violation = check_filesystem(command, roots)
-    if violation:
-        raise SandboxViolation(violation)
+def cmd_metrics_clear():
+    if LOG_PATH.exists():
+        LOG_PATH.unlink()
+    print("Metrics log cleared.")
+
+
+def cmd_metrics_export(output_path: str, today_only: bool = False):
+    entries = load_log(today_only=today_only)
+    with open(output_path, "w") as f:
+        json.dump({"entries": entries, "summary": summarise(entries)}, f, indent=2)
+    print(f"Exported {len(entries)} entries to {output_path}")

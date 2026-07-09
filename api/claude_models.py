@@ -1,6 +1,6 @@
 """
 claude_models.py — Models API + Computer Use + Adaptive/Interleaved Thinking
-AI Model Coder CLI v1.23.0
+ZAI Coder CLI v1.23.0
 
 Covers:
   • Models API  — list available models, get model info

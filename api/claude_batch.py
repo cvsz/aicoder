@@ -1,6 +1,6 @@
 """
 claude_batch.py — Messages Batch API
-AI Model Coder CLI v1.11.1
+ZAI Coder CLI v1.11.1
 
 Process large numbers of requests asynchronously at 50% cost discount.
 Ideal for bulk code review, batch documentation, mass refactoring.
@@ -33,7 +33,7 @@ from typing import Optional
 import anthropic
 
 
-BATCH_STORE = Path(os.path.expanduser("~/.ai-coder/batches"))
+BATCH_STORE = Path(os.path.expanduser("~/.zaicoder/batches"))
 
 # 300k output tokens on the Message Batches API. Per platform.claude.com/docs
 # (checked 2026-07-02): "On the Message Batches API, Claude Opus 4.8, Opus
@@ -231,8 +231,8 @@ def cmd_batch_submit(jsonl_path: str, api_key: str, model: str, system: str = No
     print(f"\033[94mℹ Submitting batch from {jsonl_path}…\033[0m")
     bid = bc.submit_from_jsonl(jsonl_path, system=system)
     print(f"\033[92m✓ Batch submitted: {bid}\033[0m")
-    print(f"  Check status:   ai-coder --batch-status {bid}")
-    print(f"  Get results:    ai-coder --batch-results {bid}")
+    print(f"  Check status:   zzai-coder --batch-status {bid}")
+    print(f"  Get results:    zzai-coder --batch-results {bid}")
     return bid
 
 

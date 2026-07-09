@@ -1,8 +1,8 @@
 services:
-  zcoder:
+  zaicoder:
     build: .
-    image: zcoder:latest
-    container_name: zcoder
+    image: zaicoder:latest
+    container_name: zaicoder
     environment:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:?ANTHROPIC_API_KEY must be set in the environment or .env file}
       - ZCODER_LOG_FORMAT=json
@@ -10,7 +10,7 @@ services:
     volumes:
       # Persist config/cache across container restarts without baking
       # secrets or state into the image.
-      - zcoder-home:/home/zcoder
+      - zaicoder-home:/home/zaicoder
     healthcheck:
       test: ["CMD", "python", "main.py", "--health-check"]
       interval: 30s
@@ -18,9 +18,9 @@ services:
       retries: 3
       start_period: 5s
     restart: unless-stopped
-    # Interactive CLI usage: docker compose run --rm zcoder -p "..."
+    # Interactive CLI usage: docker compose run --rm zaicoder -p "..."
     stdin_open: true
     tty: true
 
 volumes:
-  zcoder-home:
+  zaicoder-home:

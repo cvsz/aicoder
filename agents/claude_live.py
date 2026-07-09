@@ -1,6 +1,6 @@
 """
 claude_live.py — Real-time streaming REPL (zai-live mode)
-AI Model Coder CLI v1.10.0
+ZAI Coder CLI v1.10.0
 
 Streams tokens as they arrive, maintains ambient context (background
 events pushed without triggering a reply), and supports the same

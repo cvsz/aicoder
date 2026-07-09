@@ -1,6 +1,6 @@
 """
 claude_evals.py — Evaluation Harness
-AI Model Coder CLI v1.9.1
+ZAI Coder CLI v1.9.1
 
 Run structured test suites against Claude: assert on output content,
 compare two model versions, track pass-rates over time, and output

@@ -1,8 +1,8 @@
 # Changelog
 
 Full per-version detail lives in `docs/*_upgrade_*.md` — this file is a
-high-level index. Two project lineages (`ai-coder-cli-v1`, the modular
-`claude_*.py`-per-feature codebase, and `ai-coder-cli-v2`, a smaller
+high-level index. Two project lineages (`zai-coder-cli-v1`, the modular
+`claude_*.py`-per-feature codebase, and `zai-coder-cli-v2`, a smaller
 single-`coder.py` CLI with its own PyInstaller packaging) were merged into
 this release; see "v1.12.0" below for exactly what came from where.
 
@@ -382,10 +382,10 @@ See `docs/26_upgrade_v1.12.1.md` for full detail.
 Packaging-only release. No API/functional changes from v1.11.1.
 
 
-- Merged in `ai-coder-cli-v2`'s standalone-executable packaging: `build.sh`
-  / `build.bat` (PyInstaller, produces a single `dist/ai-coder` binary with
+- Merged in `zai-coder-cli-v2`'s standalone-executable packaging: `build.sh`
+  / `build.bat` (PyInstaller, produces a single `dist/zai-coder` binary with
   no local Python required), `setup.sh` / `setup.bat` (venv + `.env` setup
-  for running from source), `ai-coder.spec`, `LICENSE` (MIT).
+  for running from source), `zai-coder.spec`, `LICENSE` (MIT).
 - Added `.env.example` (referenced by `setup.sh`/`setup.bat` but missing
   from both source projects) documenting `ANTHROPIC_API_KEY` (required),
   `VOYAGE_API_KEY` (optional, `claude_embeddings.py`), `GITHUB_TOKEN`
@@ -393,7 +393,7 @@ Packaging-only release. No API/functional changes from v1.11.1.
 - `requirements.txt`: bumped minimum `anthropic` SDK to `>=0.75.0`,
   required for `client.beta.agents/.environments/.sessions`
   (`--agent-managed-run`, see `claude_agents_sdk.ManagedAgentsClient`).
-- Everything else in `ai-coder-cli-v2` (`coder.py`, `config.py`, `utils.py`,
+- Everything else in `zai-coder-cli-v2` (`coder.py`, `config.py`, `utils.py`,
   `skills.py`, `agents.py`, `multi_agent_core.py`, `workflow_examples.py`,
   `batches.py`, its own `managed_agents.py`) was **not** merged — v1 already
   has a mature, independently-audited implementation of the same ground

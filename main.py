@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-main.py — AI Model Coder CLI
+main.py — ZAI Coder CLI
 Version 1.22.0 | Adds Session-Level Agent Overrides, Vault Credential
 Injection Location controls, Streamed Event Deltas, and Code Execution
 version upgrade — closing four gaps found by re-running the ROADMAP.md
@@ -19,7 +19,7 @@ from pathlib import Path
 from personalities import PERSONALITIES
 
 VERSION = "1.22.0"
-BANNER  = f"\033[94mAI Model Coder CLI v{VERSION}\033[0m"
+BANNER  = f"\033[94mZAI Coder CLI v{VERSION}\033[0m"
 
 # Named agent roles. Previously these seven names only existed as a
 # print-only list under --list-agents (main.py:447 in v1.11.1) with no
@@ -65,8 +65,8 @@ def _read_file(path):
 
 def build_parser():
     from claude_models import UPGRADE_TARGETS
-    p = argparse.ArgumentParser(prog="ai-coder",
-        description=f"AI Model Coder CLI v{VERSION}",
+    p = argparse.ArgumentParser(prog="zai-coder",
+        description=f"ZAI Coder CLI v{VERSION}",
         formatter_class=argparse.RawTextHelpFormatter)
 
     g = p.add_argument_group("Global")
@@ -260,8 +260,8 @@ def build_parser():
     tu.add_argument("--max-turns", type=int, default=10, dest="max_turns")
     tu.add_argument("--memory-agent", metavar="PROMPT", dest="memory_agent",
                     help="Run an agent loop backed by the native memory tool (memory_20250818)")
-    tu.add_argument("--memory-dir", default="~/.ai-coder/memory", dest="memory_dir",
-                    help="Local directory backing --memory-agent (default: ~/.ai-coder/memory)")
+    tu.add_argument("--memory-dir", default="~/.zaicoder/memory", dest="memory_dir",
+                    help="Local directory backing --memory-agent (default: ~/.zaicoder/memory)")
     tu.add_argument("--context-management", action="store_true", dest="context_management",
                     help="With --server-tool: auto-clear stale tool results on long calls "
                          "(context-management-2025-06-27 beta)")

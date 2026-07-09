@@ -1,6 +1,6 @@
 """
 claude_citations.py — Citations & RAG
-AI Model Coder CLI v1.8.0
+ZAI Coder CLI v1.8.0
 
 Ground Claude's answers in source documents with inline citations.
 Uses search result content blocks + citations API (GA).

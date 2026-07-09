@@ -1,10 +1,10 @@
 @echo off
-REM Build script for AI Model Coder CLI standalone executable (Windows)
+REM Build script for ZAI Coder CLI standalone executable (Windows)
 REM Creates a single .exe that doesn't require Python
 
 setlocal enabledelayedexpansion
 
-echo 🔨 AI Model Coder CLI - Standalone Build
+echo 🔨 ZAI Coder CLI - Standalone Build
 echo ==========================================
 echo.
 
@@ -45,7 +45,7 @@ echo    This may take 1-2 minutes...
 echo.
 
 pyinstaller --onefile ^
-    --name ai-coder ^
+    --name zai-coder ^
     --console ^
     --hidden-import=anthropic ^
     main.py
@@ -55,15 +55,15 @@ echo ✅ Build complete!
 echo.
 
 REM Check output
-if exist "dist\ai-coder.exe" (
-    for /F %%A in ('dir /b dist\ai-coder.exe') do (
-        echo 🎉 Standalone executable created: dist\ai-coder.exe
+if exist "dist\zai-coder.exe" (
+    for /F %%A in ('dir /b dist\zai-coder.exe') do (
+        echo 🎉 Standalone executable created: dist\zai-coder.exe
     )
     echo.
     echo Next steps:
-    echo 1. Copy 'dist\ai-coder.exe' to any location
+    echo 1. Copy 'dist\zai-coder.exe' to any location
     echo 2. Set API key: set ANTHROPIC_API_KEY=sk-ant-...
-    echo 3. Run: ai-coder.exe -p "Create code"
+    echo 3. Run: zai-coder.exe -p "Create code"
     echo.
 ) else (
     echo ❌ Build failed
@@ -74,7 +74,7 @@ if exist "dist\ai-coder.exe" (
 REM Cleanup
 echo 🧹 Cleaning up build files...
 rmdir /s /q build >nul 2>&1
-del ai-coder.spec >nul 2>&1
+del zai-coder.spec >nul 2>&1
 echo ✅ Cleanup complete
 echo.
 

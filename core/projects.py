@@ -1,6 +1,6 @@
 """
 projects.py — Feature Projects subsystem
-AI Model Coder CLI v1.7.0
+ZAI Coder CLI v1.7.0
 
 Manages full project lifecycles: create, plan, scaffold, track tasks,
 run agents across a project, and maintain a project manifest.
@@ -12,7 +12,7 @@ import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 
-PROJECTS_DIR = os.path.expanduser("~/.ai-coder/projects")
+PROJECTS_DIR = os.path.expanduser("~/.zaicoder/projects")
 
 
 # ── helpers ────────────────────────────────────────────────────────────────

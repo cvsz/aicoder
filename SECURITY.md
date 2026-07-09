@@ -40,7 +40,7 @@ This project ships the following controls (see `security.py`,
   (default 25 MB, override via `ZCODER_MAX_FILE_SIZE_BYTES`) bound memory
   use from `--file`/`--file-upload` before any API call is made.
 - **Least-privilege container** — the Docker image runs as a non-root
-  `zcoder` user (see `Dockerfile`); config/cache are volume-mounted under
+  `zaicoder` user (see `Dockerfile`); config/cache are volume-mounted under
   that user's home rather than baked into the image.
 - **No secrets in the image** — `.dockerignore` excludes `.env`, `.bak`
   files, and git history from the build context.
@@ -60,7 +60,7 @@ This project ships the following controls (see `security.py`,
   Anthropic's hosted code-execution tool. If you extend this project to
   run generated code locally, that requires its own sandboxing (containers,
   seccomp, no network) which is *not* provided here.
-- **API key storage**: `~/.ai-coder-config.json` stores the key in plain
+- **API key storage**: `~/.zaicoder-config.json` stores the key in plain
   text on disk if you use `--setup` instead of an environment variable.
   Prefer `ANTHROPIC_API_KEY` (env var, or a secrets manager in production)
   over the on-disk config for anything beyond local dev.

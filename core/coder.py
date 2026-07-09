@@ -1,6 +1,6 @@
 """
 coder.py — Claude API integration core
-AI Model Coder CLI v1.23.0
+ZAI Coder CLI v1.23.0
 """
 import os
 import json

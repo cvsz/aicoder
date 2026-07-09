@@ -2,7 +2,7 @@
 claude_eval.py — Evaluation harness for prompts, agents, and skills.
 Run a test suite of (input, expected) pairs, score responses, and
 compare two model/prompt configurations head-to-head.
-AI Model Coder CLI v1.10.0
+ZAI Coder CLI v1.10.0
 """
 
 import json
@@ -14,7 +14,7 @@ from datetime import datetime
 import anthropic
 from utils import sampling_kwargs
 
-EVALS_DIR = Path.home() / ".ai-coder" / "evals"
+EVALS_DIR = Path.home() / ".zaicoder" / "evals"
 
 
 @dataclass

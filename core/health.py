@@ -54,7 +54,7 @@ def _check_config_writable() -> CheckResult:
     try:
         directory = os.path.dirname(CONFIG_PATH) or "."
         os.makedirs(directory, exist_ok=True)
-        probe = os.path.join(directory, ".zcoder_health_probe")
+        probe = os.path.join(directory, ".zaicoder_health_probe")
         with open(probe, "w") as f:
             f.write("ok")
         os.remove(probe)

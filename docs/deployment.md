@@ -3,7 +3,7 @@
 ## Configuration
 
 All configuration is via environment variables (preferred for production)
-or `~/.ai-coder-config.json` (fine for local dev; see `SECURITY.md` for
+or `~/.zaicoder-config.json` (fine for local dev; see `SECURITY.md` for
 why env vars are preferred).
 
 | Variable                    | Required | Default | Purpose |
@@ -38,11 +38,11 @@ bandit -r . -x ./tests       # security static analysis
 ## Running in Docker
 
 ```bash
-docker build -t zcoder .
-docker run --rm -e ANTHROPIC_API_KEY=sk-ant-... zcoder -p "hello"
+docker build -t zaicoder .
+docker run --rm -e ANTHROPIC_API_KEY=sk-ant-... zaicoder -p "hello"
 
 # or via compose (reads ANTHROPIC_API_KEY from the environment or a .env file)
-docker compose run --rm zcoder -p "hello"
+docker compose run --rm zaicoder -p "hello"
 ```
 
 The image runs as a non-root user, has a `HEALTHCHECK` wired to
@@ -94,11 +94,11 @@ See `docs/observability.md` for metrics/tracing hooks (`claude_metrics.py`,
 Every release is tagged. To roll back a container deployment:
 
 ```bash
-docker pull zcoder:<previous-tag>
+docker pull zaicoder:<previous-tag>
 docker compose up -d
 ```
 
-Config/state on the `zcoder-home` volume is forward/backward compatible
+Config/state on the `zaicoder-home` volume is forward/backward compatible
 within a major version (flat JSON files, no schema migrations as of
 1.12.x).
 

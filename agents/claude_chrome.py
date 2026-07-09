@@ -1,6 +1,6 @@
 """
 claude_chrome.py — CLI browsing-agent loop (Claude in Chrome analog)
-AI Model Coder CLI v1.15.0
+ZAI Coder CLI v1.15.0
 
 IMPORTANT — what this module is, and isn't: Claude in Chrome is a browser
 extension with a side panel, click/type/tab control, logged-in-session
@@ -114,7 +114,7 @@ def fetch_page(url, timeout=15):
 # that are otherwise reachable.
 @retry(max_attempts=2, base_delay=1.0, max_delay=5.0)
 def _fetch_retrying(url, timeout):
-    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (zcoder-browse)"})
+    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (zaicoder-browse)"})
     try:
         with urllib.request.urlopen(req, timeout=timeout) as r:
             return r.read().decode(r.headers.get_content_charset() or "utf-8", errors="replace")
@@ -155,7 +155,7 @@ def cmd_browse(api_key, model, start_url, task, max_steps=6, allowed_domains=Non
     from coder import Coder
 
     c = Coder(api_key=api_key, model=model, temperature=temperature, max_tokens=max_tokens)
-    print(f"\033[94mAI Model Coder — browse\033[0m  (model: {c.model})")
+    print(f"\033[94mZAI Coder — browse\033[0m  (model: {c.model})")
     print(f"Task: {task}")
     print(f"Start: {start_url}\n")
 

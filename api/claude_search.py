@@ -1,6 +1,6 @@
 """
 claude_search.py — Web Search & Web Fetch (Anthropic server tools)
-AI Model Coder CLI v1.23.0
+ZAI Coder CLI v1.23.0
 
 Enables Claude to search the web and fetch URLs in real-time.
 Uses web_search_20260318 and web_fetch_20260318 (latest versions,

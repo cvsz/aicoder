@@ -1,13 +1,13 @@
 """
 claude_tool_runner.py — SDK Tool Runner (client.beta.messages.tool_runner)
-AI Model Coder CLI v1.19.0
+ZAI Coder CLI v1.19.0
 
 Wraps the Anthropic Python SDK's own tool-calling convenience helper:
 `@beta_tool`-decorated plain Python functions, executed automatically by
 `client.beta.messages.tool_runner(...)`, which iterates the request/
 tool-execution/next-request loop for you until Claude stops calling tools.
 
-Why this is a different thing from zcoder's other agent loops:
+Why this is a different thing from zaicoder's other agent loops:
   `claude_tools.py`'s docstring and CLI-flag list had claimed a
   "Tool runner (auto-executes registered Python callables)" feature and a
   `--tool-run` flag since at least v1.11.0. Confirmed absent this cycle —
@@ -27,13 +27,13 @@ Why this is a different thing from zcoder's other agent loops:
   `tool_runner` is the opposite tradeoff: it's Anthropic's own convenience
   wrapper for the common case of "I just have some plain Python functions
   Claude should be able to call" — no context editing/compaction/hooks
-  integration, but no loop to hand-write either. Use zcoder's other agent
+  integration, but no loop to hand-write either. Use zaicoder's other agent
   loops when you need those extras; use `--tool-runner` for a quick script
   where a handful of `@beta_tool` functions are the whole tool surface.
 
 CLI flags:
   --tool-runner PROMPT       Run prompt through client.beta.messages.tool_runner
-                              with zcoder's small built-in read-only local
+                              with zaicoder's small built-in read-only local
                               tool set (read_file, list_directory)
   --tool-runner-max-iters N  Cap on tool-call round trips (default 10) —
                               a safety bound since tool_runner will keep

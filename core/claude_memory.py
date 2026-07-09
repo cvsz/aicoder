@@ -1,175 +1,145 @@
 """
-claude_memory.py — Persistent cross-session memory
-AI Model Coder CLI v1.10.0
-
-Stores facts, preferences, events and tasks in ~/.ai-coder/memory/.
-Recall uses keyword + importance scoring; swap in embeddings for
-larger stores. Memory is namespaced so multi-user gateway setups
-stay isolated.
+claude_observability.py — Observability: structured request/response
+logging, latency histograms, and AI-powered error trend analysis.
+ZAI Coder CLI v1.10.0
 """
 
 import json
+import math
+import time
 import uuid
+from collections import defaultdict
+from functools import wraps
 from pathlib import Path
-from typing import List, Dict, Optional, Any
-from dataclasses import dataclass, field
+from typing import Any, Callable, Dict, List, Optional
 from datetime import datetime, timedelta
-from enum import Enum
+import anthropic
 
-MEMORY_DIR = Path.home() / ".ai-coder" / "memory"
-
-
-class MemType(Enum):
-    FACT       = "fact"
-    PREFERENCE = "preference"
-    EVENT      = "event"
-    TASK       = "task"
+OBS_DIR  = Path.home() / ".zaicoder" / "observability"
+LOG_FILE = OBS_DIR / "requests.jsonl"
 
 
-@dataclass
-class MemEntry:
-    mid:        str = field(default_factory=lambda: str(uuid.uuid4())[:8])
-    content:    str = ""
-    mtype:      MemType = MemType.FACT
-    tags:       List[str] = field(default_factory=list)
-    importance: int = 5      # 1–10; 10 = never auto-deleted
-    created:    str = field(default_factory=lambda: datetime.now().isoformat())
-    accessed:   Optional[str] = None
+# ── Structured logging ────────────────────────────────────────────────────────
 
-    def to_dict(self):
-        return {"mid": self.mid, "content": self.content, "mtype": self.mtype.value,
-                "tags": self.tags, "importance": self.importance,
-                "created": self.created, "accessed": self.accessed}
-
-    @staticmethod
-    def from_dict(d) -> "MemEntry":
-        e = MemEntry()
-        e.mid = d["mid"]; e.content = d["content"]
-        e.mtype = MemType(d.get("mtype","fact"))
-        e.tags = d.get("tags", []); e.importance = d.get("importance", 5)
-        e.created = d.get("created", datetime.now().isoformat())
-        e.accessed = d.get("accessed")
-        return e
+def _log(record: Dict[str, Any]):
+    OBS_DIR.mkdir(parents=True, exist_ok=True)
+    with open(LOG_FILE, "a") as f:
+        f.write(json.dumps(record) + "\n")
 
 
-class MemoryStore:
-    def __init__(self, ns: str = "default"):
-        self.ns = ns
-        self.entries: List[MemEntry] = []
-        self._load()
+def _read_logs(hours: int = 24) -> List[Dict]:
+    if not LOG_FILE.exists(): return []
+    cutoff = (datetime.now() - timedelta(hours=hours)).isoformat()
+    records = []
+    with open(LOG_FILE) as f:
+        for line in f:
+            try:
+                r = json.loads(line)
+                if r.get("ts", "") >= cutoff: records.append(r)
+            except Exception: pass
+    return records
 
-    def _path(self) -> Path:
-        MEMORY_DIR.mkdir(parents=True, exist_ok=True)
-        return MEMORY_DIR / f"{self.ns}.json"
 
-    def _load(self):
-        p = self._path()
-        if p.exists():
-            self.entries = [MemEntry.from_dict(d) for d in json.loads(p.read_text())]
+def record_request(model: str, prompt: str, response: str,
+                   latency_ms: int, in_tokens: int, out_tokens: int,
+                   error: Optional[str] = None, tags: Optional[List[str]] = None):
+    _log({"req_id": str(uuid.uuid4())[:8], "ts": datetime.now().isoformat(),
+          "model": model, "prompt_preview": prompt[:120],
+          "response_preview": response[:120] if response else "",
+          "latency_ms": latency_ms, "in_tokens": in_tokens,
+          "out_tokens": out_tokens, "error": error, "tags": tags or []})
 
-    def save(self):
-        self._path().write_text(json.dumps([e.to_dict() for e in self.entries], indent=2))
 
-    def add(self, content: str, mtype: MemType = MemType.FACT,
-            tags: Optional[List[str]] = None, importance: int = 5) -> MemEntry:
-        e = MemEntry(content=content, mtype=mtype, tags=tags or [], importance=importance)
-        self.entries.append(e); self.save(); return e
+# ── Decorator for auto-instrumentation ───────────────────────────────────────
 
-    def recall(self, query: str, limit: int = 6) -> List[MemEntry]:
-        words = set(query.lower().split())
-        scored = []
-        for e in self.entries:
-            overlap = len(words & set(e.content.lower().split()))
-            tag_hit = sum(1 for t in e.tags if t.lower() in query.lower())
-            score = overlap + tag_hit * 2 + e.importance * 0.1
-            if score > 0: scored.append((score, e))
-        scored.sort(key=lambda x: x[0], reverse=True)
-        out = [e for _, e in scored[:limit]]
-        for e in out:
-            e.accessed = datetime.now().isoformat()
-        if out: self.save()
-        return out
+def observe(model: str = "unknown", tags: Optional[List[str]] = None):
+    """Decorator: wrap any function that (a) takes prompt as first arg and
+    (b) returns a string response, logging latency + token estimate."""
+    def decorator(fn: Callable) -> Callable:
+        @wraps(fn)
+        def wrapper(*args, **kwargs):
+            prompt = args[0] if args else kwargs.get("prompt", "")
+            t0 = time.time()
+            error = None
+            result = ""
+            try:
+                result = fn(*args, **kwargs)
+                return result
+            except Exception as e:
+                error = str(e); raise
+            finally:
+                ms = int((time.time() - t0) * 1000)
+                est_in  = max(1, len(str(prompt)) // 4)
+                est_out = max(1, len(str(result)) // 4)
+                record_request(model, str(prompt), str(result), ms,
+                               est_in, est_out, error=error, tags=tags)
+        return wrapper
+    return decorator
 
-    def forget(self, mid: str) -> bool:
-        before = len(self.entries)
-        self.entries = [e for e in self.entries if e.mid != mid]
-        if len(self.entries) < before:
-            self.save(); return True
-        return False
 
-    def context_block(self, query: str, limit: int = 5) -> str:
-        hits = self.recall(query, limit)
-        if not hits: return ""
-        lines = ["## Memory Context"]
-        for h in hits:
-            lines.append(f"- [{h.mtype.value}] {h.content}")
-        return "\n".join(lines)
+# ── Analytics ─────────────────────────────────────────────────────────────────
 
-    def stats(self) -> Dict[str, Any]:
-        by_type = {}
-        for t in MemType:
-            by_type[t.value] = sum(1 for e in self.entries if e.mtype == t)
-        return {"total": len(self.entries), "by_type": by_type, "namespace": self.ns}
+def _histogram(values: List[float], buckets: int = 6) -> str:
+    if not values: return "(no data)"
+    lo, hi = min(values), max(values)
+    if hi == lo: return f"all values = {lo:.0f}"
+    width = (hi - lo) / buckets
+    counts = [0] * buckets
+    for v in values:
+        idx = min(int((v - lo) / width), buckets - 1)
+        counts[idx] += 1
+    lines = []
+    for i, c in enumerate(counts):
+        label = f"{lo + i*width:.0f}–{lo + (i+1)*width:.0f}"
+        bar   = "█" * max(1, int(c / max(counts) * 20)) if c else ""
+        lines.append(f"  {label:>12}ms  {bar} {c}")
+    return "\n".join(lines)
 
-    def enforce_retention(self, max_age_days: int = 365, max_entries: int = 2000,
-                          protect_above: int = 9) -> Dict[str, int]:
-        now = datetime.now(); removed_age = 0; removed_cap = 0
-        cutoff = now - timedelta(days=max_age_days)
-        kept = [e for e in self.entries
-                if e.importance >= protect_above
-                or datetime.fromisoformat(e.created) >= cutoff]
-        removed_age = len(self.entries) - len(kept)
-        self.entries = kept
-        if len(self.entries) > max_entries:
-            prot = [e for e in self.entries if e.importance >= protect_above]
-            unprot = sorted([e for e in self.entries if e.importance < protect_above],
-                           key=lambda e: e.importance)
-            drop = max(0, len(self.entries) - max_entries)
-            drop_ids = {e.mid for e in unprot[:drop]}
-            removed_cap = len(drop_ids)
-            self.entries = [e for e in self.entries if e.mid not in drop_ids]
-        self.save()
-        return {"removed_age": removed_age, "removed_cap": removed_cap}
+
+def latency_report(hours: int = 24):
+    records = _read_logs(hours)
+    if not records: print(f"No requests in the last {hours}h."); return
+    lats = [r["latency_ms"] for r in records if "latency_ms" in r]
+    by_model: Dict[str, List[float]] = defaultdict(list)
+    for r in records: by_model[r.get("model","?")].append(r.get("latency_ms",0))
+    errors = [r for r in records if r.get("error")]
+
+    print(f"Requests (last {hours}h): {len(records)}  errors: {len(errors)}")
+    print(f"Latency — p50={sorted(lats)[len(lats)//2]:.0f}ms  "
+          f"p95={sorted(lats)[int(len(lats)*0.95)]:.0f}ms  "
+          f"avg={sum(lats)/len(lats):.0f}ms\n")
+    print("Latency histogram (ms):")
+    print(_histogram(lats))
+    print("\nBy model:")
+    for m, ls in sorted(by_model.items()):
+        avg = sum(ls)/len(ls)
+        print(f"  {m:<40} {len(ls):>4} calls  avg={avg:.0f}ms")
+
+
+def error_analysis(api_key: str, model: str, hours: int = 24):
+    records = _read_logs(hours)
+    errors  = [r for r in records if r.get("error")]
+    if not errors: print("No errors in logs."); return
+    summary = "\n".join(f"- {e['ts'][:16]} [{e['model']}] {e['error']}" for e in errors[-20:])
+    client  = anthropic.Anthropic(api_key=api_key)
+    resp = client.messages.create(
+        model=model, max_tokens=512, temperature=0,
+        system="You are an SRE. Analyse these API error logs and identify patterns + fixes.",
+        messages=[{"role": "user", "content": summary}])
+    print(resp.content[0].text)
 
 
 # ── CLI commands ──────────────────────────────────────────────────────────────
 
-def cmd_memory_add(content: str, mtype: str = "fact", tags: str = "", importance: int = 5,
-                   ns: str = "default"):
-    store = MemoryStore(ns)
-    entry = store.add(content, MemType(mtype),
-                      tags=[t.strip() for t in tags.split(",") if t.strip()],
-                      importance=importance)
-    print(f"✓ Stored [{entry.mid}] {entry.content}")
-
-
-def cmd_memory_recall(query: str, ns: str = "default", limit: int = 6):
-    store = MemoryStore(ns)
-    hits = store.recall(query, limit)
-    if not hits:
-        print("No matching memories."); return
-    print(f"Memories matching '{query}':\n")
-    for h in hits:
-        print(f"  [{h.mid}] ({h.mtype.value}, importance={h.importance}) {h.content}")
-        if h.tags: print(f"         tags: {', '.join(h.tags)}")
-
-
-def cmd_memory_forget(mid: str, ns: str = "default"):
-    store = MemoryStore(ns)
-    if store.forget(mid): print(f"✓ Forgot {mid}")
-    else: print(f"Not found: {mid}")
-
-
-def cmd_memory_stats(ns: str = "default"):
-    store = MemoryStore(ns)
-    s = store.stats()
-    print(f"Namespace: {s['namespace']}  |  Total: {s['total']}")
-    for t, c in s["by_type"].items():
-        print(f"  {t:<15} {c}")
-
-
-def cmd_memory_retention(ns: str = "default", max_age: int = 365, max_entries: int = 2000):
-    store = MemoryStore(ns)
-    r = store.enforce_retention(max_age_days=max_age, max_entries=max_entries)
-    print(f"✓ Retention applied — removed {r['removed_age']} by age, "
-          f"{r['removed_cap']} by cap. {len(store.entries)} remain.")
+def cmd_obs_latency(hours: int = 24):   latency_report(hours)
+def cmd_obs_errors(api_key: str, model: str, hours: int = 24):
+    error_analysis(api_key, model, hours)
+def cmd_obs_clear():
+    if LOG_FILE.exists(): LOG_FILE.unlink(); print("✓ Observability log cleared.")
+    else: print("No log to clear.")
+def cmd_obs_tail(n: int = 20):
+    recs = _read_logs(hours=999999)[-n:]
+    if not recs: print("No records."); return
+    for r in recs:
+        err = f" ERROR: {r['error']}" if r.get("error") else ""
+        print(f"{r['ts'][:19]}  {r['model']:<35}  {r.get('latency_ms',0):>5}ms{err}")

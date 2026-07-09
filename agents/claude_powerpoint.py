@@ -1,6 +1,6 @@
 """
 claude_powerpoint.py — Conversational slide-deck assistant
-AI Model Coder CLI v1.15.0
+ZAI Coder CLI v1.15.0
 
 A chat loop purpose-built for slide decks: describe what you want in plain
 English — add a slide, restyle a title, turn bullets into a comparison
@@ -315,7 +315,7 @@ def cmd_pptx_chat(api_key, model, input_path=None, output_path=None,
 
     c = Coder(api_key=api_key, model=model, temperature=temperature, max_tokens=max_tokens)
 
-    print(f"\033[94mAI Model Coder — PowerPoint chat\033[0m  (model: {c.model})")
+    print(f"\033[94mZAI Coder — PowerPoint chat\033[0m  (model: {c.model})")
     print(f"Deck: {output_path}  (saved after every applied change)")
     print("Type /help for commands, /exit to quit.\n")
 
@@ -411,7 +411,7 @@ def _cmd_pptx_chat_native(api_key, model, input_path=None, output_path=None, max
             sys.exit(1)
         pending_file_ids = [fid]
 
-    print(f"\033[94mAI Model Coder — PowerPoint chat (native Skills API)\033[0m  (model: {model})")
+    print(f"\033[94mZAI Coder — PowerPoint chat (native Skills API)\033[0m  (model: {model})")
     print(f"Deck: {output_path}  (saved after every turn that produces one)")
     print("Type /exit to quit. (/slides, /show, /undo aren't available in --pptx-native.)\n")
 

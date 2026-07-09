@@ -56,5 +56,5 @@ jobs:
     needs: [test]
     steps:
       - uses: actions/checkout@v4
-      - run: docker build -t zcoder:ci .
-      - run: docker run --rm zcoder:ci --version
+      - run: docker build -t zaicoder:ci .
+      - run: docker run --rm zaicoder:ci --version

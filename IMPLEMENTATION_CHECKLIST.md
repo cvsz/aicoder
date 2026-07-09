@@ -1,4 +1,4 @@
-# IMPLEMENTATION CHECKLIST (Form) — zcoder v1.16.0
+# IMPLEMENTATION CHECKLIST (Form) — zaicoder v1.16.0
 
 Source: `ROADMAP.md` Part 2 — Gap Audit vs. `platform.claude.com/docs` (checked 2026-07-04)
 One form per gap. All six gaps are now done — Forms 1–5 shipped in
@@ -17,7 +17,7 @@ narrative writeups this form-style tracker summarizes.
 | Priority | 🔴 P0 |
 | Module(s) affected | `claude_fable5.py` |
 | Est. effort | ~1 file, ~60 lines, no new deps |
-| Owner | zcoder maintainers |
+| Owner | zaicoder maintainers |
 | Target date | v1.15.0 |
 | Status | ☐ Not started ☐ In progress ☐ In review ☑ Done |
 
@@ -30,7 +30,7 @@ narrative writeups this form-style tracker summarizes.
 - [x] Tests added/updated for both code paths (`tests/test_claude_fable5.py`, 15 tests)
 
 **Sign-off**
-- Reviewed by: zcoder maintainers  Date: v1.15.0 release
+- Reviewed by: zaicoder maintainers  Date: v1.15.0 release
 - Notes: Shipped as planned, no scope changes.
 
 ---
@@ -42,7 +42,7 @@ narrative writeups this form-style tracker summarizes.
 | Priority | 🟠 P1 |
 | Module(s) affected | ~~New: `claude_context_editing.py`~~; integration: `claude_code.py` (see notes — no new module was needed) |
 | Est. effort | ~1 new file + 1 integration point, ~200 lines (revised: 0 new files, ~1 integration point) |
-| Owner | zcoder maintainers |
+| Owner | zaicoder maintainers |
 | Target date | v1.15.0 |
 | Status | ☐ Not started ☐ In progress ☐ In review ☑ Done |
 
@@ -55,7 +55,7 @@ narrative writeups this form-style tracker summarizes.
 - [x] Confirm default behavior unchanged (opt-in only, `context_management=None` default)
 
 **Sign-off**
-- Reviewed by: zcoder maintainers  Date: v1.15.0 release
+- Reviewed by: zaicoder maintainers  Date: v1.15.0 release
 - Notes: The original gap-audit was wrong about this one — `claude_tools.py`
   already had a complete `build_context_management()`, so no new module
   was created. The real gap was narrower: `claude_code.py`'s agent loop
@@ -72,7 +72,7 @@ narrative writeups this form-style tracker summarizes.
 | Priority | 🟠 P1 |
 | Module(s) affected | New: `claude_skills_api.py`; follow-up: `claude_excel.py`, `claude_powerpoint.py` |
 | Est. effort | ~1 new file, ~120 lines (excel/pptx integration is a separate follow-up) |
-| Owner | zcoder maintainers |
+| Owner | zaicoder maintainers |
 | Target date | v1.15.0 |
 | Status | ☐ Not started ☐ In progress ☐ In review ☑ Done |
 
@@ -85,7 +85,7 @@ narrative writeups this form-style tracker summarizes.
 - [x] **Follow-up PR (separate, not this one):** `--excel-native` / `--pptx-native` flags on `claude_excel.py` / `claude_powerpoint.py`, existing hand-rolled logic kept as fallback — landed in the same v1.15.0 pass, ahead of the original schedule
 
 **Sign-off**
-- Reviewed by: zcoder maintainers  Date: v1.15.0 release
+- Reviewed by: zaicoder maintainers  Date: v1.15.0 release
 - Notes: Follow-up item landed early rather than as a separate PR; no
   regression to the fallback path when Skills access isn't available.
 
@@ -98,7 +98,7 @@ narrative writeups this form-style tracker summarizes.
 | Priority | 🟡 P2 |
 | Module(s) affected | New: `claude_admin_api.py` (renamed from planned `claude_usage_api.py`, folded with Form 5); cross-link: `claude_cost_optimizer.py` |
 | Est. effort | ~1 file, ~100 lines. Requires Admin API key |
-| Owner | zcoder maintainers |
+| Owner | zaicoder maintainers |
 | Target date | v1.15.0 |
 | Status | ☐ Not started ☐ In progress ☐ In review ☑ Done |
 
@@ -110,7 +110,7 @@ narrative writeups this form-style tracker summarizes.
 - [x] CLI help text clearly flags Admin API key requirement (avoid silent 401)
 
 **Sign-off**
-- Reviewed by: zcoder maintainers  Date: v1.15.0 release
+- Reviewed by: zaicoder maintainers  Date: v1.15.0 release
 - Notes: Named `claude_admin_api.py`, not `claude_usage_api.py` — see
   Form 5, folded into the same module.
 
@@ -123,7 +123,7 @@ narrative writeups this form-style tracker summarizes.
 | Priority | 🟡 P2 |
 | Module(s) affected | `claude_admin_api.py` |
 | Est. effort | ~80 lines, combined with Usage API module |
-| Owner | zcoder maintainers |
+| Owner | zaicoder maintainers |
 | Target date | v1.15.0 |
 | Status | ☐ Not started ☐ In progress ☐ In review ☑ Done (list/revoke — create is N/A by design) |
 
@@ -135,7 +135,7 @@ narrative writeups this form-style tracker summarizes.
 - [x] Admin API auth requirements documented alongside Usage API
 
 **Sign-off**
-- Reviewed by: zcoder maintainers  Date: v1.15.0 release
+- Reviewed by: zaicoder maintainers  Date: v1.15.0 release
 - Notes: `--admin-create-key` deliberately does not call an endpoint —
   see the module docstring for why that's a documented boundary, not a
   gap.
@@ -149,7 +149,7 @@ narrative writeups this form-style tracker summarizes.
 | Priority | 🟡 P2 |
 | Module(s) affected | New: `claude_compliance_api.py`; integration: `main.py` (new `Compliance API` argument group + dispatch block) |
 | Est. effort | Originally estimated N/A (documented gap only); actual: ~450 lines (client + all `cmd_*` wrappers) |
-| Owner | zcoder maintainers |
+| Owner | zaicoder maintainers |
 | Target date | v1.16.0 |
 | Status | ☐ Documented gap (default) ☑ Reconsidered — built |
 
@@ -180,7 +180,7 @@ narrative writeups this form-style tracker summarizes.
 - [x] Tests: `tests/test_claude_compliance_api.py`, 28 tests, all passing
 
 **Sign-off**
-- Reviewed by: zcoder maintainers  Date: v1.16.0 release
+- Reviewed by: zaicoder maintainers  Date: v1.16.0 release
 - Notes: This is not a reversal of the v1.15.0 "leave as a gap" call —
   that recommendation's own stated exit condition was met, so building
   it now is consistent with the original plan, not a departure from it.
@@ -193,7 +193,7 @@ narrative writeups this form-style tracker summarizes.
 |---|---|
 | Module(s) affected | `claude_cache.py`; integration: `main.py` (new `Prompt Caching` group flags + dispatch) |
 | Est. effort | ~150 lines (builder + validator + threading through `generate_cached()`/`multi_turn_cached()`) |
-| Owner | zcoder maintainers |
+| Owner | zaicoder maintainers |
 | Target date | v1.18.0 |
 | Status | ☑ Done |
 
@@ -223,7 +223,7 @@ narrative writeups this form-style tracker summarizes.
   test coverage before this cycle)
 
 **Sign-off**
-- Reviewed by: zcoder maintainers  Date: v1.18.0 release
+- Reviewed by: zaicoder maintainers  Date: v1.18.0 release
 - Notes: Placement validation runs client-side before the request goes
   out, so a misplaced system message fails fast with a specific message
   instead of spending a round trip on the API's 400.
@@ -236,7 +236,7 @@ narrative writeups this form-style tracker summarizes.
 |---|---|
 | Module(s) affected | `main.py` only — `claude_cache.py`'s client-side support already existed |
 | Est. effort | ~10 lines (one flag, one kwarg passthrough) |
-| Owner | zcoder maintainers |
+| Owner | zaicoder maintainers |
 | Target date | v1.18.0 |
 | Status | ☑ Done |
 
@@ -257,7 +257,7 @@ narrative writeups this form-style tracker summarizes.
   second-call reference-prior-id case) and the beta header
 
 **Sign-off**
-- Reviewed by: zcoder maintainers  Date: v1.18.0 release
+- Reviewed by: zaicoder maintainers  Date: v1.18.0 release
 - Notes: Not a reversal or correction of any prior claim — Part 1 of
   `ROADMAP.md` always listed Prompt caching as covered by `claude_cache.py`
   and that was accurate; this was a CLI-reachability gap, not a coverage
@@ -271,7 +271,7 @@ narrative writeups this form-style tracker summarizes.
 |---|---|
 | Module(s) affected | `claude_agents_sdk.py`, `main.py` |
 | Est. effort | ~90 lines + tests |
-| Owner | zcoder maintainers |
+| Owner | zaicoder maintainers |
 | Target date | v1.19.0 |
 | Status | ☑ Done |
 
@@ -300,7 +300,7 @@ narrative writeups this form-style tracker summarizes.
   `PermissionMode`, `TOOL_PRESETS`, and `MANAGED_AGENTS_BETA`
 
 **Sign-off**
-- Reviewed by: zcoder maintainers  Date: v1.19.0 release
+- Reviewed by: zaicoder maintainers  Date: v1.19.0 release
 - Notes: Purely additive — `memory_store_id` defaults to `None` and
   `create_session()`'s existing callers are unaffected; `--agent-managed-run`
   behaves exactly as before when `--agent-memory-store` isn't passed.
@@ -313,7 +313,7 @@ narrative writeups this form-style tracker summarizes.
 |---|---|
 | Module(s) affected | `claude_agents_sdk.py`, `main.py` |
 | Est. effort | ~180 lines + tests |
-| Owner | zcoder maintainers |
+| Owner | zaicoder maintainers |
 | Target date | v1.20.0 |
 | Status | ☑ Done (Dreaming, Outcomes, Webhooks) / ⏸ Deferred (native Multiagent orchestration) |
 
@@ -345,7 +345,7 @@ narrative writeups this form-style tracker summarizes.
   reasoning and stated exit condition
 
 **Sign-off**
-- Reviewed by: zcoder maintainers  Date: v1.20.0 release
+- Reviewed by: zaicoder maintainers  Date: v1.20.0 release
 - Notes: All three shipped features are purely additive —
   `outcome_description`/`outcome_rubric` default to `None` so
   `cmd_managed_agent_run()`'s existing plain-task behavior is unchanged

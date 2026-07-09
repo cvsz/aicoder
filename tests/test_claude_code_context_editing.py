@@ -19,7 +19,7 @@ from claude_tools import CONTEXT_MANAGEMENT_BETA, build_context_management
 
 @pytest.fixture(autouse=True)
 def isolated_sessions_dir(tmp_path, monkeypatch):
-    """Keep CodeSession.save() out of the real ~/.ai-coder directory."""
+    """Keep CodeSession.save() out of the real ~/.zaicoder directory."""
     monkeypatch.setattr("claude_code.SESSIONS_DIR", tmp_path)
 
 

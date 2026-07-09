@@ -46,7 +46,7 @@ additive infrastructure plus internal wiring in `coder.py`/`main.py`.
 - `requirements-dev.txt` — pytest, pytest-cov, ruff, black, mypy, bandit.
 - `.github/workflows/ci.yml` — lint + bandit + pytest matrix (3.9–3.12) +
   Docker build smoke test, on every push/PR.
-- `Dockerfile` (multi-stage, non-root `zcoder` user, `HEALTHCHECK` wired
+- `Dockerfile` (multi-stage, non-root `zaicoder` user, `HEALTHCHECK` wired
   to `--health-check`) + `.dockerignore` + `docker-compose.yml`.
 - `Makefile` — `make check` runs lint + typecheck + security + tests.
 - `SECURITY.md`, `ARCHITECTURE.md`, `CONTRIBUTING.md`,
@@ -62,7 +62,7 @@ additive infrastructure plus internal wiring in `coder.py`/`main.py`.
   release's diff reviewable rather than touching every network call site
   in the same pass.
 - No concurrent-writer protection was added for the local JSON state files
-  (`~/.ai-coder/projects.json` etc). Not new to this release, but worth
+  (`~/.zaicoder/projects.json` etc). Not new to this release, but worth
   flagging: two CLI invocations writing the same project at once can race.
 - `mypy` is configured but the existing modules aren't type-annotated
   throughout; `make typecheck` will report a large baseline of

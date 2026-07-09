@@ -1,6 +1,6 @@
 """
 claude_router.py — Multi-Agent Conversation Router
-AI Model Coder CLI v1.9.1
+ZAI Coder CLI v1.9.1
 
 Routes every incoming prompt to the most appropriate specialist agent
 by asking a lightweight classifier call first, then forwarding to the
@@ -18,9 +18,13 @@ import json
 import urllib.request
 import urllib.error
 from typing import Optional
-from core.utils import sampling_kwargs
+from utils import sampling_kwargs
 
-ENDPOINT = "http://192.168.74.128:20128/v1/messages"
+from exceptions import AICoderError
+from resilience import CircuitBreaker, retry, urlopen_json
+
+ENDPOINT = "https://api.anthropic.com/v1/messages"
+_breaker = CircuitBreaker(failure_threshold=5, reset_timeout=30)
 
 # ── Built-in routing table ──────────────────────────────────────────────────
 DEFAULT_ROUTING_TABLE = {
@@ -37,7 +41,8 @@ DEFAULT_ROUTING_TABLE = {
 }
 
 
-def _post(api_key: str, payload: dict) -> dict:
+@retry(max_attempts=4, base_delay=1.0, max_delay=15.0, breaker=_breaker)
+def _call(api_key: str, payload: dict) -> dict:
     headers = {
         "Content-Type": "application/json",
         "x-api-key": api_key,
@@ -47,11 +52,16 @@ def _post(api_key: str, payload: dict) -> dict:
         ENDPOINT, data=json.dumps(payload).encode(),
         headers=headers, method="POST",
     )
+    return urlopen_json(req, timeout=60)
+
+
+def _post(api_key: str, payload: dict) -> dict:
+    # Preserves the pre-existing {"error": ...} contract callers below
+    # already check for, while retrying transient failures in _call().
     try:
-        with urllib.request.urlopen(req, timeout=60) as r:
-            return json.loads(r.read().decode())
-    except urllib.error.HTTPError as e:
-        return {"error": e.read().decode()}
+        return _call(api_key, payload)
+    except AICoderError as e:
+        return {"error": e.message}
     except Exception as e:
         return {"error": str(e)}
 

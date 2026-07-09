@@ -1,9 +1,9 @@
 @echo off
-REM Setup script for AI Model Coder CLI (Windows)
+REM Setup script for ZAI Coder CLI (Windows)
 
 setlocal enabledelayedexpansion
 
-echo 🚀 AI Model Coder CLI Setup
+echo 🚀 ZAI Coder CLI Setup
 echo ================================
 echo.
 

@@ -1,6 +1,6 @@
 """
 claude_advisor.py — Advisor tool (advisor_20260301, beta)
-AI Model Coder CLI v1.11.0
+ZAI Coder CLI v1.11.0
 
 This was a complete gap before this pass: the advisor tool did not exist
 anywhere in the project. It's a server tool that pairs a faster "executor"

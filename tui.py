@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 tui.py — Master Omega Advance Professional TUI
-AI Model Coder CLI v1.23.0 | Final Release
+ZAI Coder CLI v1.23.0 | Final Release
 
 A rich, interactive Terminal User Interface built with Textual.
 Provides a split-screen dashboard with real-time monitoring,
@@ -254,7 +254,7 @@ class StatusRow(Static):
 class MasterOmegaTUI(App):
     """Master Omega Advance Professional TUI — Final Release."""
 
-    TITLE = "⚡ AI Model Coder — Master Omega TUI"
+    TITLE = "⚡ ZAI Coder — Master Omega TUI"
     SUB_TITLE = "v1.23.0 | Deep Web Research Cycle"
     CSS = TUI_CSS
 
@@ -591,7 +591,7 @@ class MasterOmegaTUI(App):
             self.notify("No messages to save", title="Save", severity="warning")
             return
 
-        session_dir = Path.home() / ".ai-coder-sessions"
+        session_dir = Path.home() / ".zaicoder-sessions"
         session_dir.mkdir(exist_ok=True)
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         filename = session_dir / f"session_{timestamp}.json"

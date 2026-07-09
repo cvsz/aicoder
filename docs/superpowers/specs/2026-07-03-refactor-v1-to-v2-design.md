@@ -1,4 +1,4 @@
-# Design Spec: Refactoring ai-coder-cli (v1 -> v2 Pattern)
+# Design Spec: Refactoring zai-coder-cli (v1 -> v2 Pattern)
 Date: 2026-07-03
 
 ## 1. Goal

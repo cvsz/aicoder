@@ -1,6 +1,6 @@
 # CHECKLIST.md
 
-**zcoder v1.16.0 — Roadmap Execution Checklist**
+**zaicoder v1.16.0 — Roadmap Execution Checklist**
 Derived from `ROADMAP.md` Part 2 (Gap Audit vs. `platform.claude.com/docs`, checked 2026-07-04).
 
 Six confirmed gaps, ranked by priority. Check off each sub-task as it lands;

@@ -2,7 +2,7 @@
 
 ## Overview
 
-zcoder is a single-process Python CLI that wraps the Anthropic Messages
+zaicoder is a single-process Python CLI that wraps the Anthropic Messages
 API, plus a modular set of feature areas (one `claude_*.py` file per API
 surface: files, batches, vision, RAG, agents, etc). `main.py` is the only
 entrypoint; every feature is reachable as a CLI flag, there is no
@@ -137,7 +137,7 @@ major version could flip this to raise-by-default with a
 ## State & persistence
 
 All local state is flat JSON files under the user's home directory —
-`~/.ai-coder-config.json` (config), `~/.ai-coder/` (projects, artifacts,
+`~/.zaicoder-config.json` (config), `~/.zaicoder/` (projects, artifacts,
 files registry, sessions). There is no database. This keeps the tool
 zero-install beyond Python + `pip install -r requirements.txt`, at the
 cost of no concurrent-writer safety — two CLI invocations writing to the
@@ -148,7 +148,7 @@ here so it isn't rediscovered as a surprise.
 
 Two ways to run this:
 1. **From source**: `setup.sh`/`setup.bat` create a venv and `.env`.
-2. **Standalone binary**: `build.sh`/`build.bat` + `ai-coder.spec` produce
+2. **Standalone binary**: `build.sh`/`build.bat` + `zai-coder.spec` produce
    a PyInstaller single-file executable with no local Python required.
 3. **Container**: `Dockerfile` (multi-stage, non-root, healthcheck) +
    `docker-compose.yml` for anything that wants to run this as a service

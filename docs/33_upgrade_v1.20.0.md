@@ -171,7 +171,7 @@ orchestration:** `claude_agents_sdk.py` already has
 goal into steps and runs each as an independent Messages API call from
 the local process — no shared Managed Agents session, no shared
 sandbox, no persistent cross-subagent event stream. It's a legitimate,
-different pattern (and still useful for zcoder's actual usage: an
+different pattern (and still useful for zaicoder's actual usage: an
 independent-subtasks decomposition doesn't need a shared filesystem),
 not a partial implementation of the native feature under a different
 name.
@@ -183,7 +183,7 @@ delegation model. A faithful implementation means designing how
 configuration on the Agent resource and handles multiple concurrent
 event-stream threads (`sessions.threads.*`, per the docs) — a
 meaningfully larger, more architecturally involved surface than the
-three items closed above, and there isn't yet a concrete zcoder use case
+three items closed above, and there isn't yet a concrete zaicoder use case
 that needs subagents to share one live sandbox rather than run as
 independent calls. This is the same reasoning `ROADMAP.md` used for the
 Compliance API between v1.15.0 (documented as a gap, not built) and

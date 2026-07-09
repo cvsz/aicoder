@@ -2,7 +2,7 @@
 claude_hooks.py — Lifecycle hooks (pre/post tool-use, session start/end).
 claude_permissions.py — Fine-grained allow/deny/ask ACL for tool names.
 claude_plan_mode.py — Propose a numbered plan, approve, then execute.
-AI Model Coder CLI v1.10.0
+ZAI Coder CLI v1.10.0
 """
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -19,8 +19,8 @@ from typing import Any, Callable, Dict, List, Optional
 from dataclasses import dataclass, field
 from datetime import datetime
 
-HOOKS_FILE = Path.home() / ".ai-coder" / "hooks.json"
-PERMS_FILE = Path.home() / ".ai-coder" / "permissions.json"
+HOOKS_FILE = Path.home() / ".zaicoder" / "hooks.json"
+PERMS_FILE = Path.home() / ".zaicoder" / "permissions.json"
 
 
 class HookEvent(Enum):

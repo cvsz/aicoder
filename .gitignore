@@ -30,8 +30,8 @@ dist/
 
 # Local app state (mirrors what the CLI writes under the user's home;
 # harmless if it ever ends up in-repo during local testing)
-.ai-coder/
-.ai-coder-config.json
+.zaicoder/
+.zaicoder-config.json
 
 # Editors / OS
 .vscode/

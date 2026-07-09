@@ -1,6 +1,6 @@
 """
 claude_structured.py — Structured Outputs
-AI Model Coder CLI v1.8.0
+ZAI Coder CLI v1.8.0
 
 Force Claude to respond in validated JSON matching a schema.
 Uses the output_config.format parameter (GA on Sonnet 4.5+, Opus 4.1+).

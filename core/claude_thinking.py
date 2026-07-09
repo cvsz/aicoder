@@ -1,6 +1,6 @@
 """
 claude_thinking.py — Extended Thinking & Adaptive Thinking
-AI Model Coder CLI v1.23.0
+ZAI Coder CLI v1.23.0
 
 Wraps the Anthropic SDK to expose:
   • Extended thinking  (explicit budget_tokens)

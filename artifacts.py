@@ -1,6 +1,6 @@
 """
 artifacts.py — Artifacts subsystem
-AI Model Coder CLI v1.7.0
+ZAI Coder CLI v1.7.0
 
 An Artifact is any named, versioned, AI-generated output:
   code, documentation, test suites, architecture diagrams (as text/mermaid),
@@ -24,7 +24,7 @@ import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 
-ARTIFACTS_DIR = os.path.expanduser("~/.ai-coder/artifacts")
+ARTIFACTS_DIR = os.path.expanduser("~/.zaicoder/artifacts")
 
 
 # ── helpers ────────────────────────────────────────────────────────────────

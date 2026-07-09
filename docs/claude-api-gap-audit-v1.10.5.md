@@ -1,4 +1,4 @@
-# AI Model Coder CLI v1.10.5 — Gap Audit vs. Current Claude API (checked 2026-07-02)
+# ZAI Coder CLI v1.10.5 — Gap Audit vs. Current Claude API (checked 2026-07-02)
 
 This project is unusually well-maintained for this kind of audit: `docs/19–23_upgrade_*.md`
 already record a running self-audit history, and `claude_models.py` / `claude_fable5.py` /

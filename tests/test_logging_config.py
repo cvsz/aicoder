@@ -24,7 +24,7 @@ def test_new_correlation_id_is_unique():
 def test_json_formatter_includes_correlation_id():
     new_correlation_id()
     record = logging.LogRecord(
-        name="zcoder.test", level=logging.INFO, pathname=__file__,
+        name="zaicoder.test", level=logging.INFO, pathname=__file__,
         lineno=1, msg="hello", args=(), exc_info=None,
     )
     out = JsonFormatter().format(record)

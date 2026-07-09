@@ -1,6 +1,6 @@
 """
 claude_mythos5.py — Claude Mythos 5 support (companion to claude_fable5.py)
-AI Model Coder CLI v1.10.1
+ZAI Coder CLI v1.10.1
 
 IMPORTANT — confidence note, more pointed than claude_fable5.py's: everything
 below is sourced from the same web search results as claude_fable5.py, and

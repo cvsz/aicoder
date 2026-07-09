@@ -2,7 +2,7 @@
 claude_sessions.py — Persistent conversation sessions with resume,
 checkpoints (named rewind points), and an "away summary" that shows
 what changed in the project directory while you were away.
-AI Model Coder CLI v1.10.0
+ZAI Coder CLI v1.10.0
 """
 
 import json
@@ -14,8 +14,8 @@ from typing import Dict, List, Optional, Any
 from dataclasses import dataclass, field
 from datetime import datetime
 
-SESSIONS_DIR    = Path.home() / ".ai-coder" / "sessions"
-CHECKPOINTS_DIR = Path.home() / ".ai-coder" / "checkpoints"
+SESSIONS_DIR    = Path.home() / ".zaicoder" / "sessions"
+CHECKPOINTS_DIR = Path.home() / ".zaicoder" / "checkpoints"
 SKIP_DIRS = {".git", "node_modules", "__pycache__", "venv", ".venv", "dist", "build"}
 
 

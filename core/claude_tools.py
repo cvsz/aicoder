@@ -1,6 +1,6 @@
 """
 claude_tools.py — Tool Use (Function Calling)
-AI Model Coder CLI v1.23.0
+ZAI Coder CLI v1.23.0
 
 Full tool-use support:
   • Custom tool definitions (JSON Schema)
@@ -56,7 +56,7 @@ CLI flags:
   --strict-tools          Strict schema validation on tool inputs
   --memory-agent PROMPT   Run an agent loop backed by the native memory tool
   --memory-dir DIR        Where the memory tool's local files live
-                          (default: ~/.ai-coder/memory)
+                          (default: ~/.zaicoder/memory)
   --context-management    Enable context editing (clear_tool_uses) on
                           --tool-agent / --server-tool calls
   --compaction            Enable server-side compaction on --server-tool
@@ -401,7 +401,7 @@ class MemoryToolHandler:
     per Anthropic's documented path-traversal-protection requirement for
     memory tool implementations."""
 
-    def __init__(self, base_dir: str = "~/.ai-coder/memory"):
+    def __init__(self, base_dir: str = "~/.zaicoder/memory"):
         import os
         self.base_dir = os.path.abspath(os.path.expanduser(base_dir))
         os.makedirs(self.base_dir, exist_ok=True)
@@ -922,7 +922,7 @@ def cmd_server_tool(prompt: str, tools: list[str], api_key: str, model: str,
 
 
 def cmd_memory_agent(prompt: str, api_key: str, model: str,
-                     memory_dir: str = "~/.ai-coder/memory", max_turns: int = 10):
+                     memory_dir: str = "~/.zaicoder/memory", max_turns: int = 10):
     """Run an agent loop backed by the native memory tool."""
     print(f"\033[94mℹ Memory-tool agent | dir={memory_dir}\033[0m\n")
     tc     = ToolCoder(api_key=api_key, model=model)

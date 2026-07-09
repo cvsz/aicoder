@@ -1,4 +1,4 @@
-# AI Model Coder CLI — v1.23.0 "Deep Web Research Cycle"
+# ZAI Coder CLI — v1.23.0 "Deep Web Research Cycle"
 All Claude API Features + Claude Code / Agent SDK + Cowork + Plugins
 
 ## New in v1.23.0 — Deep Web Research Cycle (18 gaps closed)
@@ -236,19 +236,19 @@ pip install -r requirements-dev.txt
 make check          # or: pytest && ruff check . && bandit -r . -x ./tests
 
 # Container
-docker build -t zcoder .
-docker run --rm -e ANTHROPIC_API_KEY=sk-ant-... zcoder -p "hello"
+docker build -t zaicoder .
+docker run --rm -e ANTHROPIC_API_KEY=sk-ant-... zaicoder -p "hello"
 ```
 
-## New in v1.12.0 — standalone packaging (merged from ai-coder-cli-v2)
+## New in v1.12.0 — standalone packaging (merged from zai-coder-cli-v2)
 
 Packaging-only release, no API/functional changes from v1.11.1. Added a
 working standalone-executable build story this project never had:
 `./setup.sh` (or `.bat`) for a venv + `.env` from source, `./build.sh` (or
-`.bat`) to produce a single dependency-free `dist/ai-coder` binary via
+`.bat`) to produce a single dependency-free `dist/zai-coder` binary via
 PyInstaller, plus `LICENSE` (MIT) and `.env.example`. See
 `docs/25_merge_v2_into_release.md` for exactly what was merged in from the
-`ai-coder-cli-v2` lineage and — just as importantly — what wasn't and why
+`zai-coder-cli-v2` lineage and — just as importantly — what wasn't and why
 (mostly: v1 already had a more complete, already-wired implementation of
 the same ground under the same file/class names). `QUICKSTART.md` has the
 fastest path to a first run either way.
@@ -275,7 +275,7 @@ See `docs/24_upgrade_v1.11.0.md` for the full v1.11.0 + v1.11.1 changelog,
 including the full list of files touched by the sampling-parameter fix and
 what's still open.
 
-# AI Model Coder CLI — v1.11.0 (superseded by v1.11.1 above)
+# ZAI Coder CLI — v1.11.0 (superseded by v1.11.1 above)
 All Claude API Features + Claude Code / Agent SDK + Cowork + Plugins
 
 ## New in v1.11.0 — Advisor tool, real Programmatic Tool Calling, Tool Use
@@ -344,7 +344,7 @@ and what's still open after this pass.
 
 ## Quick Start
 ```bash
-unzip ai-coder-cli-v1.9.0.zip && cd ai-coder-cli
+unzip zai-coder-cli-v1.9.0.zip && cd zai-coder-cli
 export ANTHROPIC_API_KEY=sk-ant-...
 python main.py -p "Write a Python web scraper"
 ```
@@ -452,7 +452,7 @@ is a different thing (server-declared, client-executed, GA since
   before touching disk (path-traversal protection, per Anthropic's
   documented requirement for memory tool implementations).
 - **`ToolCoder.run_agent_with_memory()`** / **`--memory-agent PROMPT`**
-  (+ `--memory-dir DIR`, default `~/.ai-coder/memory`) — a full agent
+  (+ `--memory-dir DIR`, default `~/.zaicoder/memory`) — a full agent
   loop that dispatches `memory` tool_use blocks to `MemoryToolHandler`
   automatically, so memory persists across calls without hand-rolling
   the command dispatch yourself.
@@ -791,9 +791,9 @@ python main.py --list-models
 
 ## Storage
 ```
-~/.ai-coder/code_sessions/   # Agent sessions
-~/.ai-coder/projects/        # Feature projects
-~/.ai-coder/artifacts/       # Versioned artifacts
+~/.zaicoder/code_sessions/   # Agent sessions
+~/.zaicoder/projects/        # Feature projects
+~/.zaicoder/artifacts/       # Versioned artifacts
 .claude/CLAUDE.md            # Project memory (auto-loaded)
 ~/.claude/CLAUDE.md          # User memory (always loaded)
 .mcp.json                    # MCP servers (auto-loaded)

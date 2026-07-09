@@ -1,6 +1,6 @@
 """
 claude_excel.py — Conversational spreadsheet / data-analysis assistant
-AI Model Coder CLI v1.14.0
+ZAI Coder CLI v1.14.0
 
 A chat loop purpose-built for spreadsheet work: describe what you want in
 plain English — clean up messy data, build a financial model, summarize a
@@ -252,7 +252,7 @@ def cmd_excel_chat(api_key, model, input_path=None, output_path=None, sheet_name
 
     c = Coder(api_key=api_key, model=model, temperature=temperature, max_tokens=max_tokens)
 
-    print(f"\033[94mAI Model Coder — Excel chat\033[0m  (model: {c.model})")
+    print(f"\033[94mZAI Coder — Excel chat\033[0m  (model: {c.model})")
     print(f"Workbook: {output_path}  (saved after every applied change)")
     print("Type /help for commands, /exit to quit.\n")
 
@@ -349,7 +349,7 @@ def _cmd_excel_chat_native(api_key, model, input_path=None, output_path=None, ma
             sys.exit(1)
         pending_file_ids = [fid]
 
-    print(f"\033[94mAI Model Coder — Excel chat (native Skills API)\033[0m  (model: {model})")
+    print(f"\033[94mZAI Coder — Excel chat (native Skills API)\033[0m  (model: {model})")
     print(f"Workbook: {output_path}  (saved after every turn that produces one)")
     print("Type /exit to quit. (/sheets, /show, /undo aren't available in --excel-native.)\n")
 

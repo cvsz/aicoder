@@ -101,7 +101,7 @@ def setup_logging(level: str | None = None, fmt: str | None = None) -> logging.L
     level = (level or os.getenv("ZCODER_LOG_LEVEL") or "INFO").upper()
     fmt = (fmt or os.getenv("ZCODER_LOG_FORMAT") or ("json" if not sys.stderr.isatty() else "text")).lower()
 
-    root = logging.getLogger("zcoder")
+    root = logging.getLogger("zaicoder")
     root.setLevel(level)
     root.handlers.clear()
 
@@ -118,9 +118,9 @@ def setup_logging(level: str | None = None, fmt: str | None = None) -> logging.L
 
 
 def get_logger(name: str) -> logging.Logger:
-    """Get a child logger under the `zcoder` namespace, e.g. get_logger('coder')
-    -> 'zcoder.coder'. Falls back to a lazily-configured root if
+    """Get a child logger under the `zaicoder` namespace, e.g. get_logger('coder')
+    -> 'zaicoder.coder'. Falls back to a lazily-configured root if
     setup_logging() hasn't been called yet (e.g. under pytest)."""
-    if not logging.getLogger("zcoder").handlers:
+    if not logging.getLogger("zaicoder").handlers:
         setup_logging()
-    return logging.getLogger(f"zcoder.{name}")
+    return logging.getLogger(f"zaicoder.{name}")

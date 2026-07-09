@@ -1,6 +1,6 @@
 """
 claude_files.py — Files API (beta)
-AI Model Coder CLI v1.8.0
+ZAI Coder CLI v1.8.0
 
 Upload files once, reference by file_id in multiple Messages API calls.
 Supports: PDFs, images, plain text, code, documents.
@@ -30,7 +30,7 @@ FILES_BASE    = "https://api.anthropic.com/v1/files"
 MESSAGES_BASE = "https://api.anthropic.com/v1/messages"
 BETA_HEADER   = "files-api-2025-04-14"
 
-LOCAL_REGISTRY = Path(os.path.expanduser("~/.ai-coder/files_registry.json"))
+LOCAL_REGISTRY = Path(os.path.expanduser("~/.zaicoder/files_registry.json"))
 _breaker = CircuitBreaker(failure_threshold=5, reset_timeout=30)
 
 
@@ -245,7 +245,7 @@ def cmd_file_upload(file_path: str, api_key: str, model: str):
     print(f"  Filename: {result.get('filename', '')}")
     print(f"  Size:     {result.get('size', 0):,} bytes")
     print(f"  Created:  {result.get('created_at', '')}")
-    print(f"\n  Use with: ai-coder --file-ask {result['id']} \"your question\"")
+    print(f"\n  Use with: zzai-coder --file-ask {result['id']} \"your question\"")
     return result["id"]
 
 

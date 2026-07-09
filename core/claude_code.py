@@ -1,6 +1,6 @@
 """
 claude_code.py — Claude Code / Agent SDK (all features)
-AI Model Coder CLI v1.8.0
+ZAI Coder CLI v1.8.0
 
 Implements every Claude Code / Agent SDK feature from docs.claude.com:
 
@@ -75,8 +75,8 @@ from pathlib import Path
 from typing import Optional, Callable
 
 # ── Storage paths ──────────────────────────────────────────────────────────
-SESSIONS_DIR  = Path(os.path.expanduser("~/.ai-coder/code_sessions"))
-HOOKS_DIR     = Path(os.path.expanduser("~/.ai-coder/hooks"))
+SESSIONS_DIR  = Path(os.path.expanduser("~/.zaicoder/code_sessions"))
+HOOKS_DIR     = Path(os.path.expanduser("~/.zaicoder/hooks"))
 SKILLS_DIR    = Path(".claude/skills")
 AGENTS_DIR    = Path(".claude/agents")
 COMMANDS_DIR  = Path(".claude/commands")
@@ -582,7 +582,7 @@ class SkillsRegistry:
 # TODO LISTS
 # ══════════════════════════════════════════════════════════════════════════
 
-TODO_FILE = Path(os.path.expanduser("~/.ai-coder/code_todos.json"))
+TODO_FILE = Path(os.path.expanduser("~/.zaicoder/code_todos.json"))
 
 class TodoManager:
     def __init__(self):
@@ -713,7 +713,7 @@ class CodeAgent:
     # time (agent-chosen), not one fixed downstream dependency.
     @retry(max_attempts=2, base_delay=1.0, max_delay=5.0)
     def _webfetch_retrying(self, url: str) -> str:
-        req = urllib.request.Request(url, headers={"User-Agent": "ai-coder-agent/1.8"})
+        req = urllib.request.Request(url, headers={"User-Agent": "zzai-coder-agent/1.8"})
         try:
             with urllib.request.urlopen(req, timeout=15) as r:
                 return r.read().decode("utf-8", errors="replace")[:4000]
@@ -1200,7 +1200,7 @@ def cmd_code_agent(
 
     if not headless:
         print(f"\n\033[90m{session.cost_summary()}\033[0m")
-        print(f"\033[90m  Resume: ai-coder --code-agent-session {session.id} -p \"...\"\033[0m")
+        print(f"\033[90m  Resume: zzai-coder --code-agent-session {session.id} -p \"...\"\033[0m")
     return result
 
 
@@ -1343,7 +1343,7 @@ def cmd_code_slash(command: str, api_key: str, model: str,
         pass
 
     print(f"\033[91m✗ Unknown slash command: {full_cmd}\033[0m")
-    print("  Run: ai-coder --code-agent-slash help")
+    print("  Run: zzai-coder --code-agent-slash help")
 
 
 def cmd_code_cost(api_key: str):

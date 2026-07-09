@@ -1,10 +1,10 @@
 #!/bin/bash
-# Build script for AI Model Coder CLI standalone executable
+# Build script for ZAI Coder CLI standalone executable
 # Creates a single executable that doesn't require Python
 
 set -e
 
-echo "🔨 AI Model Coder CLI - Standalone Build"
+echo "🔨 ZAI Coder CLI - Standalone Build"
 echo "=========================================="
 echo ""
 
@@ -41,7 +41,7 @@ echo "   This may take 1-2 minutes..."
 echo ""
 
 pyinstaller --onefile \
-    --name ai-coder \
+    --name zai-coder \
     --console \
     --hidden-import=anthropic \
     --strip \
@@ -52,15 +52,15 @@ echo "✅ Build complete!"
 echo ""
 
 # Check output
-if [ -f "dist/ai-coder" ]; then
-    ls -lh dist/ai-coder
+if [ -f "dist/zai-coder" ]; then
+    ls -lh dist/zai-coder
     echo ""
-    echo "🎉 Standalone executable created: dist/ai-coder"
+    echo "🎉 Standalone executable created: dist/zai-coder"
     echo ""
     echo "Next steps:"
-    echo "1. Copy 'dist/ai-coder' to any location"
+    echo "1. Copy 'dist/zai-coder' to any location"
     echo "2. Set API key: export ANTHROPIC_API_KEY='sk-ant-...'"
-    echo "3. Run: ./ai-coder -p 'Create code'"
+    echo "3. Run: ./zai-coder -p 'Create code'"
     echo ""
 else
     echo "❌ Build failed"
@@ -69,7 +69,7 @@ fi
 
 # Cleanup
 echo "🧹 Cleaning up build files..."
-rm -rf build ai-coder.spec > /dev/null 2>&1
+rm -rf build zai-coder.spec > /dev/null 2>&1
 echo "✅ Cleanup complete"
 echo ""
 

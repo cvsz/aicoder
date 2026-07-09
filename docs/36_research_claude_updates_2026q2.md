@@ -5,13 +5,13 @@ and `anthropic.com/news`. Sources checked: Models overview, Messages API
 reference, Extended Thinking guide, Tool Use reference, Prompt Caching
 guide, Streaming reference, and Anthropic news feed.
 
-zcoder version at time of research: **v1.22.0** (current, 220 tests passing).
+zaicoder version at time of research: **v1.22.0** (current, 220 tests passing).
 
 ---
 
 ## Summary
 
-zcoder is remarkably up-to-date — the previous gap-audit cycles (v1.15.0
+zaicoder is remarkably up-to-date — the previous gap-audit cycles (v1.15.0
 through v1.22.0) have closed nearly every significant gap. This deep
 research cycle found **10 remaining API-level gaps** and **4 product-surface
 items** worth tracking. No gaps are P0/critical; most are P1-P2 additive
@@ -33,13 +33,13 @@ tokens are still billed.
 Mythos 5, Sonnet 5, Opus 4.8, Opus 4.7, and Mythos Preview. `"summarized"`
 remains the default for Opus 4.6, Sonnet 4.6, and earlier Claude 4 models.
 
-**Current state in zcoder:** `claude_thinking.py` builds `thinking_cfg`
+**Current state in zaicoder:** `claude_thinking.py` builds `thinking_cfg`
 with only `type` and `budget_tokens` — no `display` field anywhere in
 the module. Grepping for `omitted` across the codebase returns zero
 matches.
 
 **Impact:** Users calling newer models get the `"omitted"` default from
-the API server anyway, but zcoder can't let users opt *into* `"omitted"`
+the API server anyway, but zaicoder can't let users opt *into* `"omitted"`
 on older models, can't opt *out of* `"omitted"` on newer models (to see
 the full thinking), and doesn't handle the `signature_delta` streaming
 event that replaces `thinking_delta` when display is omitted.
@@ -58,7 +58,7 @@ event that replaces `thinking_delta` when display is omitted.
 ### 🟡 P1-2 — `effort: "xhigh"` level missing
 
 **What it is:** The API's `output_config.effort` parameter accepts 5
-levels: `low`, `medium`, `high`, `xhigh`, `max`. zcoder only maps 4.
+levels: `low`, `medium`, `high`, `xhigh`, `max`. zaicoder only maps 4.
 
 **Current state:** `claude_thinking.py`'s `EFFORT_BUDGETS` dict maps
 `low`→2000, `medium`→8000, `high`→16000, `max`→32000. `xhigh` is
@@ -109,7 +109,7 @@ is two versions behind on both tools.
 is available alongside the current `code_execution_20260120`. The API docs
 list both as valid versions.
 
-**Current state:** zcoder uses `code_execution_20260120` everywhere
+**Current state:** zaicoder uses `code_execution_20260120` everywhere
 (`claude_tools.py`, `claude_code_exec.py`). The `20260521` version is
 not referenced anywhere in the codebase.
 
@@ -170,7 +170,7 @@ categories. No code change needed, but the docstring only mentions
 **What it is:** Claude Opus 4.1 (`claude-opus-4-1-20250514`) is scheduled
 for retirement on August 5, 2026. Users must migrate to Opus 4.8.
 
-**Current state:** Opus 4.1 exists in zcoder's model catalog but has no
+**Current state:** Opus 4.1 exists in zaicoder's model catalog but has no
 retirement date recorded.
 
 **Implementation plan:**
@@ -183,7 +183,7 @@ retirement date recorded.
 ## Part 2 — Product Surface Updates (Non-API)
 
 These are Claude.ai web/desktop product updates that don't have direct
-API counterparts but are worth tracking for zcoder's analog features
+API counterparts but are worth tracking for zaicoder's analog features
 (`cowork.py`, `claude_excel.py`, `claude_powerpoint.py`, `claude_chrome.py`).
 
 ### Claude Science (announced 2026-06-30)
@@ -196,7 +196,7 @@ Collaboration feature enabling teams to work with Claude together. No
 public API documented yet.
 
 ### Claude Code (announced 2026-07-06)
-Evolved from internal CLI to public coding agent. zcoder's `claude_code.py`
+Evolved from internal CLI to public coding agent. zaicoder's `claude_code.py`
 already covers this surface comprehensively.
 
 ### Fable 5 Redeployment (2026-06-30)
@@ -209,7 +209,7 @@ categories (`frontier_llm`, `reasoning_extraction`) may relate to this.
 ## Part 3 — Already Implemented (Confirmation)
 
 The following features were investigated and confirmed already present in
-zcoder v1.22.0:
+zaicoder v1.22.0:
 
 - ✅ `service_tier` parameter (auto/standard_only/batch) — `coder.py`, `main.py`
 - ✅ `inference_geo` parameter (us/global) — `coder.py`, `claude_cost_optimizer.py`

@@ -1,322 +1,226 @@
 """
-claude_stream.py — Streaming Messages
-AI Model Coder CLI v1.23.0
+claude_cost_optimizer.py — Cost-aware model routing.
+Classifies a prompt's complexity and routes to the cheapest model that
+can handle it. Tracks cumulative spend across calls.
+ZAI Coder CLI v1.10.3
 
-Real-time streaming of Claude responses using SSE.
-Displays tokens as they arrive rather than waiting for full response.
+Pricing below verified against platform.claude.com/docs/en/about-claude/
+models/overview as of 2026-07-02. Claude Sonnet 5 has introductory
+pricing of $2/$10 per MTok through 2026-08-31 — SONNET5_INTRO_PRICE
+reflects that; PRICE["claude-sonnet-5"] holds the standing $3/$15 rate
+used once the intro window ends. Re-verify before relying on this for
+billing-sensitive decisions.
 
-New in v1.11.0 — Fine-grained tool streaming (was a documented feature with
-no code anywhere in this project): tool_use input streams to the client as
-Claude generates it, without server-side JSON buffering/validation, cutting
-latency to the first fragment of a large parameter (a file, a long string).
-Per platform.claude.com/docs (checked 2026-07-02) this is now GA on all
-models/platforms — no beta header required — and controlled per-tool with
-the eager_input_streaming field rather than a blanket header. The legacy
-fine-grained-tool-streaming-2025-05-14 beta header still works for tools
-that leave the field unset, kept here for backward compatibility with older
-integrations. Because fragments aren't validated as they stream, the
-accumulated string isn't guaranteed to be valid JSON until the block closes
-(and may never be, if stop_reason ends up "max_tokens" mid-parameter) —
-callers of stream_with_tools() get the raw accumulated string per tool call
-and should json.loads() it themselves with that in mind.
-
-Also new: refusal stop_details handling. Refusal responses carry a
-documented category ("cyber", "bio", or null) and explanation, letting you
-route different refusal classes differently — see handle_refusal().
-
-CLI flags:
-  --stream                Stream output in real time
-  --stream-thinking       Stream with thinking blocks visible
-  --stream-tools          Stream with fine-grained tool input streaming
-                           enabled on every tool passed
-  --no-stream             Force non-streaming (default for most commands)
+Note: everything in this module is a *local estimate* built from token
+counts this CLI is told about after a call completes — it never queries a
+real usage/spend endpoint, and has no way to see calls made outside this
+CLI. For actual org-level historical usage and cost data (the real
+numbers Anthropic bills against), see claude_admin_api.py's
+get_usage_report()/get_cost_report() and --usage-report — that requires
+an Admin API key rather than a regular one, which is why it's a separate
+module instead of folded into local estimation here.
 """
 
 import json
-import sys
+import time
+from pathlib import Path
+from typing import Dict, Optional, Tuple
+from dataclasses import dataclass, field
+from datetime import datetime
 import anthropic
-from typing import Optional
+from utils import sampling_kwargs
 
-# Legacy header — GA now, per-tool eager_input_streaming is the current way
-# to opt in, but this still works for requests that send it and leave the
-# field unset on individual tools.
-FINE_GRAINED_TOOL_STREAMING_BETA = "fine-grained-tool-streaming-2025-05-14"
+SPEND_LOG = Path.home() / ".zaicoder" / "cost_log.json"
+
+PRICE: Dict[str, Dict[str, float]] = {
+    # Current
+    "claude-haiku-4-5-20251001":  {"in": 1.0,   "out": 5.0},
+    "claude-sonnet-5":            {"in": 3.0,   "out": 15.0},
+    "claude-opus-4-8":            {"in": 5.0,   "out": 25.0},
+    "claude-fable-5":             {"in": 10.0,  "out": 50.0},
+    "claude-mythos-5":            {"in": 10.0,  "out": 50.0},
+    # Legacy — still callable, kept so cost estimates don't silently fall
+    # back to the DEFAULT_PRICE guess for accounts still on these
+    "claude-opus-4-7":            {"in": 5.0,   "out": 25.0},
+    "claude-opus-4-6":            {"in": 5.0,   "out": 25.0},
+    "claude-opus-4-5":            {"in": 5.0,   "out": 25.0},
+    "claude-sonnet-4-6":          {"in": 3.0,   "out": 15.0},
+    "claude-sonnet-4-5":          {"in": 3.0,   "out": 15.0},
+}
+SONNET5_INTRO_PRICE = {"in": 2.0, "out": 10.0}  # through 2026-08-31
+TIER_MODELS = ["claude-haiku-4-5-20251001", "claude-sonnet-5", "claude-opus-4-8"]
+
+# Long-context (>200K input) pricing surcharge. Previously missing entirely —
+# estimate_cost() applied flat per-model pricing regardless of input size,
+# which under-quoted cost for any model that has a long-context surcharge.
+#
+# Per platform.claude.com/docs/en/about-claude/pricing (checked 2026-07-02):
+# Claude Opus 4.8, Opus 4.7, Opus 4.6, Sonnet 4.6, and Sonnet 5 all get the
+# full 1M-token context window at FLAT standard pricing — no surcharge at
+# any input size. Those models are deliberately absent below. The surcharge
+# only still applies to models on the older 1M-context BETA
+# (context-1m-2025-08-07 header): confirmed for claude-sonnet-4-5 at 2x
+# input / 1.5x output above a 200K-token request — the *whole* request is
+# billed at the surcharge rate once it crosses the threshold, not just the
+# tokens above it. That beta is scheduled for retirement 2026-04-30 per the
+# API release notes, after which this entry stops mattering, but it's kept
+# since claude-sonnet-4-5 is still callable / still in PRICE. Add other
+# legacy models here only once their surcharge terms are confirmed —
+# guessing a multiplier is worse than omitting it, since PRICE already
+# falls back sanely for anything not in this table.
+LONG_CONTEXT_SURCHARGE: Dict[str, Dict[str, float]] = {
+    "claude-sonnet-4-5": {"threshold": 200_000, "in_mult": 2.0, "out_mult": 1.5},
+}
+
+# Data residency (inference_geo) pricing. Per platform.claude.com/docs
+# (Service tiers / Data residency, checked 2026-07-02): requests with
+# inference_geo:"us" on Claude Opus 4.6, Sonnet 4.6, and later models are
+# billed at a flat 1.1x multiplier on both input and output tokens.
+# inference_geo:"global" (the default) is standard pricing. Requesting
+# inference_geo at all on models before Opus 4.6 / Sonnet 4.6 is a 400 —
+# INFERENCE_GEO_SUPPORTED gates that at the call site (see optimized_call).
+INFERENCE_GEO_MULTIPLIER = 1.1
+INFERENCE_GEO_SUPPORTED = {
+    "claude-opus-4-8", "claude-opus-4-7", "claude-opus-4-6",
+    "claude-sonnet-5", "claude-sonnet-4-6",
+    "claude-fable-5", "claude-mythos-5",
+}
 
 
-def with_eager_input_streaming(tools: list[dict], enabled: bool = True) -> list[dict]:
-    """Return a copy of tools with eager_input_streaming set on each —
-    turns on fine-grained streaming for those tools. Pass enabled=False to
-    explicitly force buffered streaming for a tool even under the legacy
-    beta header (an explicit false overrides the header, per the docs)."""
-    out = []
-    for t in tools:
-        t2 = dict(t)
-        t2["eager_input_streaming"] = enabled
-        out.append(t2)
-    return out
-
-
-def handle_refusal(response_or_stop_details) -> Optional[dict]:
-    """Read stop_details off a (non-streaming) response dict or a
-    message_delta event's stop_details field. Returns {"category": ...,
-    "explanation": ...} when the response was a refusal with no output
-    generated, or None otherwise. category is one of "cyber", "bio",
-    "frontier_llm", "reasoning_extraction", or null per the current docs
-    (platform.claude.com/docs, checked 2026-07-09 — the last two were added
-    with the Fable 5 cyber safeguards and jailbreak severity framework).
-    Use it to route to a different fallback/support flow instead of just
-    showing the raw refusal text. Refusal-only responses
-    (stop_reason:"refusal" with no generated output) are documented as not
-    billed, so this is also useful as a signal to skip cost bookkeeping for
-    that call — see claude_cost_optimizer.py / claude_metrics.py."""
-    if isinstance(response_or_stop_details, dict) and "stop_reason" in response_or_stop_details:
-        if response_or_stop_details.get("stop_reason") != "refusal":
-            return None
-        details = response_or_stop_details.get("stop_details") or {}
+def estimate_cost(model: str, in_tok: int, out_tok: int,
+                  use_intro_pricing: bool = False,
+                  inference_geo: str = "global") -> float:
+    if model == "claude-sonnet-5" and use_intro_pricing:
+        p = SONNET5_INTRO_PRICE
     else:
-        details = response_or_stop_details or {}
-    return {
-        "category":    details.get("category"),
-        "explanation": details.get("explanation", ""),
-    }
+        p = PRICE.get(model, {"in": 3.0, "out": 15.0})
+
+    surcharge = LONG_CONTEXT_SURCHARGE.get(model)
+    if surcharge and in_tok > surcharge["threshold"]:
+        # Whole request is billed at the surcharge rate once input crosses
+        # the threshold — not just the tokens above it.
+        in_price, out_price = p["in"] * surcharge["in_mult"], p["out"] * surcharge["out_mult"]
+    else:
+        in_price, out_price = p["in"], p["out"]
+
+    if inference_geo == "us" and model in INFERENCE_GEO_SUPPORTED:
+        in_price  *= INFERENCE_GEO_MULTIPLIER
+        out_price *= INFERENCE_GEO_MULTIPLIER
+
+    return in_tok / 1e6 * in_price + out_tok / 1e6 * out_price
 
 
-class StreamCoder:
-    """Claude client with streaming support."""
-
-    def __init__(self, api_key: str, model: str = "claude-sonnet-5",
-                 max_tokens: int = 4096):
-        self.client     = anthropic.Anthropic(api_key=api_key)
-        self.model      = model
-        self.max_tokens = max_tokens
-
-    def stream(
-        self,
-        prompt: str,
-        system: Optional[str] = None,
-        tools: list = None,
-        show_thinking: bool = False,
-    ) -> str:
-        """Stream a response, printing tokens live. Returns full text."""
-        messages = [{"role": "user", "content": prompt}]
-
-        kwargs = dict(
-            model=self.model,
-            max_tokens=self.max_tokens,
-            messages=messages,
-        )
-        if system:
-            kwargs["system"] = system
-        if tools:
-            kwargs["tools"] = tools
-
-        full_text     = ""
-        thinking_text = ""
-        in_thinking   = False
-        usage_data    = {}
-
-        with self.client.messages.stream(**kwargs) as stream:
-            for event in stream:
-                etype = getattr(event, "type", "")
-
-                if etype == "content_block_start":
-                    btype = getattr(event.content_block, "type", "")
-                    if btype == "thinking":
-                        in_thinking = True
-                        if show_thinking:
-                            print("\n\033[90m[thinking] ", end="", file=sys.stderr, flush=True)
-                    elif btype == "text":
-                        in_thinking = False
-
-                elif etype == "content_block_delta":
-                    delta = event.delta
-                    dtype = getattr(delta, "type", "")
-                    if dtype == "thinking_delta":
-                        thinking_text += getattr(delta, "thinking", "")
-                        if show_thinking:
-                            print(getattr(delta, "thinking", ""), end="", file=sys.stderr, flush=True)
-                    elif dtype == "text_delta":
-                        text = getattr(delta, "text", "")
-                        full_text += text
-                        print(text, end="", flush=True)
-
-                elif etype == "content_block_stop" and in_thinking and show_thinking:
-                    print("\033[0m", file=sys.stderr)
-                    in_thinking = False
-
-                elif etype == "message_delta":
-                    usage = getattr(event, "usage", None)
-                    if usage:
-                        usage_data = {
-                            "output_tokens": getattr(usage, "output_tokens", 0),
-                        }
-                        # output_tokens_details (SDK v0.105.0+): breakdown of
-                        # output tokens including thinking_tokens. Read-only,
-                        # doesn't affect billing (output_tokens is authoritative).
-                        details = getattr(usage, "output_tokens_details", None)
-                        if details:
-                            usage_data["thinking_tokens"] = getattr(
-                                details, "thinking_tokens", 0)
-
-                elif etype == "message_start":
-                    msg   = getattr(event, "message", None)
-                    usage = getattr(msg, "usage", None) if msg else None
-                    if usage:
-                        usage_data["input_tokens"] = getattr(usage, "input_tokens", 0)
-                        # Cache details may also appear on message_start
-                        cache = getattr(usage, "cache_creation_input_tokens", None)
-                        if cache is not None:
-                            usage_data["cache_creation_input_tokens"] = cache
-                        cache_read = getattr(usage, "cache_read_input_tokens", None)
-                        if cache_read is not None:
-                            usage_data["cache_read_input_tokens"] = cache_read
-
-                elif etype == "system_message":
-                    # SDK v0.112.0: system.message streaming events fire when
-                    # mid-conversation system messages are processed. No action
-                    # needed — the message content is already in the request
-                    # we sent — but acknowledge the event to avoid surprises.
-                    pass
-
-        print()  # final newline
-        if usage_data:
-            in_tok  = usage_data.get('input_tokens', 0)
-            out_tok = usage_data.get('output_tokens', 0)
-            think   = usage_data.get('thinking_tokens')
-            cache_w = usage_data.get('cache_creation_input_tokens')
-            cache_r = usage_data.get('cache_read_input_tokens')
-            parts = [f"in={in_tok}", f"out={out_tok}"]
-            if think is not None and think > 0:
-                parts.append(f"thinking={think}")
-            if cache_w is not None and cache_w > 0:
-                parts.append(f"cache_w={cache_w}")
-            if cache_r is not None and cache_r > 0:
-                parts.append(f"cache_r={cache_r}")
-            print(f"\033[90m[tokens] {'  '.join(parts)}\033[0m")
-
-        return full_text
-
-    def stream_file_analysis(self, file_content: str, prompt: str,
-                              system: Optional[str] = None) -> str:
-        """Stream analysis of a file."""
-        full_prompt = f"```\n{file_content}\n```\n\n{prompt}"
-        return self.stream(full_prompt, system=system)
-
-    def stream_with_tools(
-        self,
-        prompt: str,
-        tools: list[dict],
-        system: Optional[str] = None,
-        eager_input_streaming: bool = True,
-        use_legacy_beta: bool = False,
-        verbose: bool = True,
-    ) -> dict:
-        """Stream a single turn with tool_use fine-grained input streaming.
-        Prints each partial_json fragment as it arrives (so a large
-        parameter — a generated file, a long string — appears incrementally
-        instead of all at once when the block closes), then returns
-        {"text": ..., "tool_calls": [{"name","id","input_raw","input"}],
-        "stop_reason": ...}. input is the parsed dict when the accumulated
-        JSON was valid, input_raw always has the raw accumulated string —
-        check both, since fine-grained streaming doesn't guarantee valid
-        JSON on truncation (stop_reason == "max_tokens" mid-parameter)."""
-        if eager_input_streaming:
-            tools = with_eager_input_streaming(tools)
-
-        messages = [{"role": "user", "content": prompt}]
-        kwargs = dict(model=self.model, max_tokens=self.max_tokens,
-                     messages=messages, tools=tools)
-        if system:
-            kwargs["system"] = system
-        extra_headers = {}
-        if use_legacy_beta:
-            extra_headers["anthropic-beta"] = FINE_GRAINED_TOOL_STREAMING_BETA
-        if extra_headers:
-            kwargs["extra_headers"] = extra_headers
-
-        full_text  = ""
-        tool_calls = []
-        current    = None  # in-progress tool_use block accumulator
-        stop_reason = None
-        stop_details = None
-
-        with self.client.messages.stream(**kwargs) as stream:
-            for event in stream:
-                etype = getattr(event, "type", "")
-
-                if etype == "content_block_start":
-                    block = event.content_block
-                    if getattr(block, "type", "") == "tool_use":
-                        current = {"name": getattr(block, "name", ""),
-                                  "id": getattr(block, "id", ""), "json": ""}
-                        if verbose:
-                            print(f"\n\033[90m[tool_use:{current['name']}] ", end="",
-                                  file=sys.stderr, flush=True)
-
-                elif etype == "content_block_delta":
-                    delta = event.delta
-                    dtype = getattr(delta, "type", "")
-                    if dtype == "text_delta":
-                        text = getattr(delta, "text", "")
-                        full_text += text
-                        print(text, end="", flush=True)
-                    elif dtype == "input_json_delta" and current is not None:
-                        frag = getattr(delta, "partial_json", "")
-                        current["json"] += frag
-                        if verbose:
-                            print(frag, end="", file=sys.stderr, flush=True)
-
-                elif etype == "content_block_stop" and current is not None:
-                    if verbose:
-                        print("\033[0m", file=sys.stderr)
-                    parsed = None
-                    try:
-                        parsed = json.loads(current["json"]) if current["json"] else {}
-                    except json.JSONDecodeError:
-                        pass  # expected possibility with eager_input_streaming
-                    tool_calls.append({
-                        "name": current["name"], "id": current["id"],
-                        "input_raw": current["json"], "input": parsed,
-                    })
-                    current = None
-
-                elif etype == "message_delta":
-                    stop_reason = getattr(event, "delta", None) and getattr(event.delta, "stop_reason", None)
-                    sd = getattr(event, "delta", None) and getattr(event.delta, "stop_details", None)
-                    if sd:
-                        stop_details = sd
-
-        print()
-        if stop_reason == "refusal":
-            refusal = handle_refusal({"stop_reason": stop_reason,
-                                      "stop_details": stop_details or {}})
-            if verbose and refusal:
-                print(f"\033[91m[refusal] category={refusal['category']} "
-                      f"{refusal['explanation']}\033[0m", file=sys.stderr)
-
-        return {"text": full_text, "tool_calls": tool_calls,
-                "stop_reason": stop_reason, "stop_details": stop_details}
+def classify_complexity(prompt: str) -> str:
+    """Simple heuristic: short simple → haiku; long/complex → sonnet; very long or code-heavy → opus."""
+    words = len(prompt.split())
+    code_markers = sum(prompt.count(k) for k in ["def ", "class ", "function ", "SELECT ", "CREATE "])
+    if words > 800 or code_markers > 5: return "high"
+    if words > 200 or code_markers > 1: return "medium"
+    return "low"
 
 
-# ── CLI entry point ────────────────────────────────────────────────────────
-
-def cmd_stream(prompt: str, api_key: str, model: str, system: str = None,
-               file_content: str = None, show_thinking: bool = False):
-    print(f"\033[94mℹ Streaming response…\033[0m\n")
-    sc = StreamCoder(api_key=api_key, model=model)
-    if file_content:
-        return sc.stream_file_analysis(file_content, prompt, system=system)
-    return sc.stream(prompt, system=system, show_thinking=show_thinking)
+def select_model(complexity: str, force: Optional[str] = None) -> str:
+    if force: return force
+    return {"low": TIER_MODELS[0], "medium": TIER_MODELS[1], "high": TIER_MODELS[2]}[complexity]
 
 
-def cmd_stream_tools(prompt: str, tools: list[dict], api_key: str, model: str,
-                     system: str = None):
-    """Stream a turn with fine-grained tool input streaming on."""
-    print(f"\033[94mℹ Streaming with fine-grained tool input…\033[0m\n")
-    sc = StreamCoder(api_key=api_key, model=model)
-    result = sc.stream_with_tools(prompt, tools, system=system)
-    if result["tool_calls"]:
-        print(f"\n\033[90m── {len(result['tool_calls'])} tool call(s) ─────\033[0m")
-        for tc in result["tool_calls"]:
-            print(f"  {tc['name']}: {tc['input'] if tc['input'] is not None else tc['input_raw'][:120]}")
-    return result
+def _log_spend(model: str, in_tok: int, out_tok: int, cost: float, prompt_preview: str):
+    SPEND_LOG.parent.mkdir(parents=True, exist_ok=True)
+    entries = []
+    if SPEND_LOG.exists():
+        try: entries = json.loads(SPEND_LOG.read_text())
+        except Exception: pass
+    entries.append({"ts": datetime.now().isoformat(), "model": model,
+                   "in_tok": in_tok, "out_tok": out_tok, "cost_usd": round(cost, 6),
+                   "prompt": prompt_preview[:80]})
+    SPEND_LOG.write_text(json.dumps(entries[-5000:], indent=2))
+
+
+@dataclass
+class OptimizedResponse:
+    text:       str
+    model_used: str
+    complexity: str
+    in_tokens:  int
+    out_tokens: int
+    cost_usd:   float
+    latency_ms: int
+
+
+def optimized_call(prompt: str, api_key: str, system: str = "",
+                   force_model: Optional[str] = None,
+                   max_tokens: int = 2048,
+                   service_tier: Optional[str] = None,
+                   inference_geo: Optional[str] = None) -> OptimizedResponse:
+    complexity = classify_complexity(prompt)
+    model      = select_model(complexity, force_model)
+    client     = anthropic.Anthropic(api_key=api_key)
+    t0         = time.time()
+    # NOTE: was hardcoded temperature=0.5, which 400s (invalid_request_error)
+    # on claude-sonnet-5 and newer — those models reject explicit sampling
+    # params entirely. Route through sampling_kwargs() so it's a no-op there
+    # and unchanged (temperature=0.5) on everything else.
+    kwargs: dict = dict(model=model, max_tokens=max_tokens,
+                        messages=[{"role": "user", "content": prompt}],
+                        **sampling_kwargs(model, temperature=0.5))
+    if system: kwargs["system"] = system
+    if service_tier:
+        # "auto" (use Priority Tier capacity if committed, else fall back to
+        # standard) or "standard_only". Priority Tier commitments are no
+        # longer purchasable but existing ones still work, and aren't
+        # supported on Sonnet 5 / Mythos-tier models — let the API 400
+        # surface rather than silently guarding it away client-side.
+        kwargs["service_tier"] = service_tier
+    if inference_geo:
+        # "us" (US-only inference, 1.1x pricing) or "global" (default).
+        # Only Opus 4.6+/Sonnet 4.6+ and later support this param at all;
+        # earlier models 400 — same reasoning as service_tier above.
+        kwargs["inference_geo"] = inference_geo
+    resp    = client.messages.create(**kwargs)
+    ms      = int((time.time() - t0) * 1000)
+    stop_reason = getattr(resp, "stop_reason", None)
+    text    = resp.content[0].text if resp.content else ""
+    in_tok  = resp.usage.input_tokens
+    out_tok = resp.usage.output_tokens
+    # Refusal billing exemption: a request that returns stop_reason:"refusal"
+    # with no generated output isn't billed on the Claude API (checked
+    # platform.claude.com/docs 2026-07-02). Don't log spend for it, and don't
+    # count it against cost estimates — it's free.
+    if stop_reason == "refusal" and out_tok == 0:
+        cost = 0.0
+    else:
+        cost = estimate_cost(model, in_tok, out_tok, inference_geo=inference_geo or "global")
+        _log_spend(model, in_tok, out_tok, cost, prompt)
+    return OptimizedResponse(text=text, model_used=model, complexity=complexity,
+                             in_tokens=in_tok, out_tokens=out_tok,
+                             cost_usd=cost, latency_ms=ms)
+
+
+# ── CLI commands ──────────────────────────────────────────────────────────────
+
+def cmd_optimized(prompt: str, api_key: str, verbose: bool = False,
+                  force_model: Optional[str] = None):
+    r = optimized_call(prompt, api_key, force_model=force_model)
+    if verbose:
+        print(f"[model={r.model_used}  complexity={r.complexity}  "
+              f"cost=${r.cost_usd:.5f}  {r.latency_ms}ms]\n")
+    print(r.text)
+
+
+def cmd_cost_summary(limit: int = 20):
+    if not SPEND_LOG.exists(): print("No cost log found."); return
+    entries = json.loads(SPEND_LOG.read_text())
+    recent  = entries[-limit:]
+    total   = sum(e["cost_usd"] for e in entries)
+    print(f"Total spend logged: ${total:.4f}  ({len(entries)} calls)\n")
+    print(f"{'Timestamp':<21} {'Model':<35} {'Cost':>9}  Prompt preview")
+    print("─" * 90)
+    for e in reversed(recent):
+        print(f"{e['ts'][:19]:<21} {e['model']:<35} ${e['cost_usd']:>8.5f}  {e['prompt']}")
+
+
+def cmd_cost_reset():
+    if SPEND_LOG.exists():
+        SPEND_LOG.unlink(); print("✓ Cost log cleared.")
+    else:
+        print("No log to clear.")

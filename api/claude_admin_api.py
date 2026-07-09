@@ -1,6 +1,6 @@
 """
 claude_admin_api.py — Admin API: Usage & Cost reporting + API key management
-AI Model Coder CLI v1.15.0
+ZAI Coder CLI v1.15.0
 
 Two thin Admin API wrappers, combined into one module since both require
 the same auth (an Admin API key, prefix sk-ant-admin..., created in the

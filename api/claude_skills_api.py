@@ -1,6 +1,6 @@
 """
 claude_skills_api.py — Agent Skills API (platform, skill_id-based)
-AI Model Coder CLI v1.15.0
+ZAI Coder CLI v1.15.0
 
 This is a *different* feature from Claude Code's local skill loader in
 claude_code.py (`SkillsRegistry`, `.claude/skills/<name>/SKILL.md`). That

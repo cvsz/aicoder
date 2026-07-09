@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Reorganize the `ai-coder-cli` codebase into a modular structure (`/api`, `/agents`, `/core`, `/utils`) while maintaining backward compatibility and simplifying `main.py`.
+**Goal:** Reorganize the `zai-coder-cli` codebase into a modular structure (`/api`, `/agents`, `/core`, `/utils`) while maintaining backward compatibility and simplifying `main.py`.
 
 **Architecture:** Moving from a flat directory structure with many `claude_*.py` files to a grouped directory structure. `coder.py` will become the central orchestrator, delegating to the new folder structure.
 

@@ -26,7 +26,7 @@ differently-worded grep before writing it into Part 2), a second grep —
 Only then was this written up as a real gap.
 
 **Why this isn't a duplicate of either existing "memory" feature:**
-zcoder already has two things with "memory" in the name, and it mattered
+zaicoder already has two things with "memory" in the name, and it mattered
 to rule both out before concluding this was new:
 
 - `claude_memory.py`'s `memory_20250818` client-side tool — the caller's

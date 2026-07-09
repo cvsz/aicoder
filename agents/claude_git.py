@@ -1,13 +1,13 @@
 """
 claude_git.py — AI-powered git integration: commit messages, PR
 descriptions, changelogs, diff review, and blame explanations.
-AI Model Coder CLI v1.10.0
+ZAI Coder CLI v1.10.0
 """
 
 import subprocess
 from typing import Optional
 import anthropic
-from core.utils import sampling_kwargs
+from utils import sampling_kwargs
 
 SYS = ("You are a senior software engineer writing git artifacts. "
        "Be concise, specific, and follow conventional commit conventions where applicable.")

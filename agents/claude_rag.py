@@ -1,6 +1,6 @@
 """
 claude_rag.py — Retrieval-Augmented Generation pipeline
-AI Model Coder CLI v1.10.0
+ZAI Coder CLI v1.10.0
 
 Indexes a local folder of files (or a pre-built index JSON), retrieves
 the most relevant chunks at query time (keyword BM25-style scoring),
@@ -21,7 +21,7 @@ from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass, field
 import anthropic
 
-INDEX_DIR = Path.home() / ".ai-coder" / "rag_indexes"
+INDEX_DIR = Path.home() / ".zaicoder" / "rag_indexes"
 SUPPORTED_EXTS = {".txt", ".md", ".py", ".js", ".ts", ".go", ".java", ".rs",
                   ".c", ".cpp", ".h", ".json", ".yaml", ".yml", ".csv", ".html"}
 

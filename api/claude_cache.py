@@ -1,6 +1,6 @@
 """
 claude_cache.py — Prompt Caching
-AI Model Coder CLI v1.18.0
+ZAI Coder CLI v1.18.0
 
 Cache stable prompt prefixes (system prompts, documents, tool definitions)
 to cut input token costs up to 90% and latency up to 85%.
@@ -65,7 +65,7 @@ _breaker = CircuitBreaker(failure_threshold=5, reset_timeout=30)
 # Per platform.claude.com/docs/en/build-with-claude/mid-conversation-system-messages
 # (checked 2026-07-08): available on the Claude API, Claude Platform on AWS,
 # and Microsoft Foundry; NOT on Amazon Bedrock or Google Cloud. Opus 4.8
-# only, no beta header required. zcoder only talks to the direct Claude API,
+# only, no beta header required. zaicoder only talks to the direct Claude API,
 # so the AWS/Foundry-vs-Bedrock/Google-Cloud split isn't relevant here, but
 # the model gate is.
 MID_SYSTEM_SUPPORTED_MODELS = {"claude-opus-4-8"}

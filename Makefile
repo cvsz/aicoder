@@ -33,10 +33,10 @@ health:
 	python main.py --health-check
 
 docker-build:
-	docker build -t zcoder:latest .
+	docker build -t zaicoder:latest .
 
 docker-run:
-	docker run --rm -e ANTHROPIC_API_KEY=$${ANTHROPIC_API_KEY} zcoder:latest
+	docker run --rm -e ANTHROPIC_API_KEY=$${ANTHROPIC_API_KEY} zaicoder:latest
 
 clean:
 	find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
