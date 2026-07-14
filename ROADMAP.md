@@ -1,669 +1,553 @@
-# ROADMAP.md
+# ZAI Coder Roadmap
 
-**ZAI Coder CLI (zaicoder) — v1.20.0**
-Last audited against `platform.claude.com/docs`: 2026-07-08
+> Strategic roadmap for evolving ZAI Coder from a provider-coupled local CLI into a production-grade, API-mediated coding platform.
 
-This roadmap has two parts:
-
-1. **Where zaicoder stands today** — a full inventory of what's implemented,
-   module by module, mapped to the Anthropic feature it covers.
-2. **What's missing** — every gap found by cross-referencing zaicoder against
-   the live Features overview and API reference at platform.claude.com/docs,
-   with a concrete implementation plan for each one, ranked by priority.
-
-Nothing in Part 2 is speculative. Each gap was confirmed by grepping the
-actual source tree for the relevant API surface (parameter names, endpoint
-paths, header strings) and finding nothing — not just "no module with this
-name," but no code path that could plausibly implement the feature under a
-different name either.
+**Repository:** `cvsz/aicoder`  
+**Document status:** Active source of truth  
+**Last updated:** 2026-07-15  
+**Source baseline verified:** `main.py` reports `v1.22.0` on the current `main` branch  
+**Execution details:** [`docs/migration/execution-plan.md`](docs/migration/execution-plan.md)
 
 ---
 
-## Part 1 — Current Coverage (46 modules, ~11,600 lines)
+## 1. Purpose
 
-### Models & model metadata
-| Feature | Module | Notes |
+This document defines product direction, architectural outcomes, release priorities, production-readiness criteria, and long-term milestones.
+
+It intentionally does not duplicate detailed implementation tasks. File-level sequencing, acceptance tests, rollback requirements, and phase gates belong in `docs/migration/execution-plan.md`.
+
+The roadmap distinguishes three states:
+
+- **Verified complete** — implemented in the repository and supported by relevant tests or build evidence.
+- **In progress** — implementation exists but one or more production gates remain open.
+- **Planned** — approved direction with no claim of completion.
+
+No feature may be marked complete solely because a module, CLI flag, test stub, or document exists.
+
+---
+
+## 2. Product Vision
+
+ZAI Coder will provide one secure and consistent experience across CLI, TUI, web, automation, and API clients.
+
+The target request path is:
+
+```text
+CLI / TUI / Web / Automation
+            |
+            v
+Canonical Typed Product API Client
+            |
+            v
+Versioned Product API
+            |
+            v
+Authentication -> Authorization -> Validation
+            |
+            v
+Application Services
+            |
+            +--> Conversation and Job Persistence
+            +--> Tool Policy and Approval Engine
+            +--> Audit and Observability
+            |
+            v
+Provider-Neutral Model Gateway
+            |
+            v
+Anthropic and Future Provider Adapters
+```
+
+Provider credentials remain server-side. User-facing clients receive product credentials and product-domain responses, not raw provider credentials or provider SDK objects.
+
+---
+
+## 3. Guiding Principles
+
+1. **Product API first** — every user-facing client uses the same versioned API contract.
+2. **Provider isolation** — provider-specific SDKs and schemas remain behind adapters.
+3. **Secure by default** — dangerous tool access is denied unless explicitly granted.
+4. **Tenant-aware ownership** — every durable record has explicit actor, organization, and workspace ownership where multi-user operation is enabled.
+5. **Contract-driven implementation** — runtime behavior, OpenAPI, typed clients, and tests remain synchronized.
+6. **Deterministic failure semantics** — retries, cancellation, idempotency, and terminal stream states are explicit.
+7. **Observable operation** — logs, metrics, traces, request IDs, audit events, and redaction are built in.
+8. **Evidence-based completion** — production readiness requires command output and test evidence.
+9. **Backward compatibility by policy** — breaking changes require migration notes and a supported transition window.
+10. **One canonical abstraction per concern** — no duplicate HTTP clients, retry implementations, auth flows, or security validators.
+
+---
+
+## 4. Verified Current State
+
+The repository currently provides a broad local CLI and supporting modules for model interaction, streaming, tools, agent workflows, files, document generation, administration, compliance, evaluation, observability, TUI, and a lightweight web application.
+
+The current source remains primarily a direct-provider application:
+
+- CLI modules can load provider credentials.
+- Multiple modules import or invoke provider-specific behavior directly.
+- The TUI and web backend are not yet fully mediated by a canonical product API.
+- API, authentication, persistence, approval, and tenant boundaries are not yet one cohesive production platform boundary.
+
+This is a valid local-tool architecture, but it does not yet satisfy the target hosted-platform architecture.
+
+### 4.1 Existing strengths
+
+- Large CLI feature surface with established commands and documentation.
+- Provider functionality covering messages, streaming, files, tools, batches, model metadata, administration, compliance, and agent workflows.
+- Retry and resilience utilities.
+- Cross-platform packaging and Windows build support.
+- Test coverage across many modules.
+- TUI streaming reliability work with bounded rendering and final flush behavior.
+- Native document-generation capabilities.
+- Security utility modules and sandbox concepts that can be consolidated into enforceable product policies.
+
+### 4.2 Principal architectural gaps
+
+- No single canonical product API client used by all clients.
+- Provider SDK and provider credential coupling remains in client-facing code.
+- No unified provider-neutral domain model.
+- No complete product authentication and refresh-token lifecycle.
+- Authorization and ownership boundaries are not consistently enforced across durable resources.
+- Tool permission modes are not yet a complete policy/state machine.
+- Local filesystem and shell tools require stronger default isolation and approval controls.
+- OpenAPI is not yet the canonical runtime contract.
+- Audit events, request correlation, metrics, and tracing are not yet end-to-end.
+- Documentation version and inventory drift must be continuously detected.
+
+---
+
+## 5. Production Readiness Dashboard
+
+| Area | Status | Target outcome |
 |---|---|---|
-| Model catalog (Opus 4.8, Sonnet 5, Haiku 4.5, Mythos Preview, legacy tiers) | `claude_models.py` | Local cache + live `/v1/models` |
-| Claude Fable 5 / Claude Mythos 5 | `claude_fable5.py`, `claude_mythos5.py` | Refusal detection, client-side fallback, fallback-credit header |
-| Retired-model registry / deprecation scanner (incl. upcoming retirements) *(2026-07-09 research)* | `claude_models.py` | `--check-deprecated PATH`, `upcoming: true` flag |
-| Computer use | `claude_models.py` | `--computer-use PROMPT` |
-| Adaptive / interleaved thinking, fast mode, effort levels (low/medium/high/xhigh/max) *(xhigh 2026-07-09)* | `claude_models.py`, `claude_thinking.py` | |
-| `output_config.effort` on Messages API *(2026-07-09 research)* | `coder.py` | `--effort` sent as request param, not just thinking budget |
-
-### Core Messages API features
-| Feature | Module |
-|---|---|
-| Extended thinking | `claude_thinking.py` |
-| Thinking display (summarized/omitted) *(2026-07-09 research)* | `claude_thinking.py` |
-| Structured outputs | `claude_structured.py` |
-| Citations | `claude_citations.py` |
-| Streaming *(output_tokens_details, system_message events 2026-07-09)* | `claude_stream.py` |
-| Batch processing | `claude_batch.py` |
-| Token counting | `claude_tokens.py` |
-| Prompt caching, Cache diagnostics (beta), Mid-conversation system messages *(v1.18.0)* | `claude_cache.py` |
-| Data residency (`inference_geo`) | `coder.py`, `claude_models.py`, `claude_cost_optimizer.py` |
-| User profile attribution (`user_profile_id`) *(2026-07-09 research)* | `coder.py` |
-| Vision / multimodal | `claude_vision.py` |
-| Embeddings *(Voyage 4 default 2026-07-09)* | `claude_embeddings.py` |
-| Files API | `claude_files.py` |
-
-### Tools
-| Feature | Module |
-|---|---|
-| Web search, web fetch *(20260318 versions, response_inclusion, use_cache)* | `claude_search.py`, `claude_tools.py` |
-| Code execution | `claude_code_exec.py` |
-| Advisor tool | `claude_advisor.py` |
-| Bash, text editor, computer use (client-side tools) | `claude_tools.py`, `claude_models.py` |
-| Memory tool | `claude_memory.py` |
-| Tool search tool | `claude_tools.py` |
-| Programmatic tool calling | `claude_tools.py` |
-| Fine-grained tool streaming | `claude_stream.py` |
-| MCP connector (`mcp_servers`, stdio/SSE/HTTP, MCP tunnels) | `claude_agents_sdk.py` |
-
-### Context management
-| Feature | Module |
-|---|---|
-| Compaction | `claude_code.py`, `claude_tools.py` |
-| Token budgets | `claude_tools.py` |
-| Context editing (`clear_tool_uses`, `clear_thinking`) | `claude_tools.py` (`build_context_management`), wired into `claude_code.py`'s agent loop via `--agent-context-editing` *(v1.15.0)* |
-
-### Claude Code / Agent SDK
-| Feature | Module |
-|---|---|
-| Agent loop, sessions, rewind/checkpointing | `claude_code.py` |
-| Permissions, hooks, plan mode | `claude_hooks_perms_plan.py` |
-| Plugins, output styles, sandbox, headless, settings | `claude_plugins.py`, `claude_output_styles.py`, `claude_sandbox.py`, `claude_settings.py` |
-| Agent Skills (local `.claude/skills/*/SKILL.md`) | `claude_code.py` |
-| Agent Skills API (platform, `skill_id`-based) | `claude_skills_api.py` *(v1.15.0)* |
-| Managed Agents (environments, sessions) | `claude_agents_sdk.py` |
-| Managed Agents memory stores (`resources: memory_store`) *(v1.19.0)* | `claude_agents_sdk.py` (`--agent-memory-store`, `--agent-memory-store-create`) |
-| Managed Agents Dreaming (research preview) *(v1.20.0)* | `claude_agents_sdk.py` (`--agent-dream`, `--agent-dream-list`, `--agent-dream-get`) |
-| Managed Agents Outcomes (public beta) *(v1.20.0)* | `claude_agents_sdk.py` (`--agent-outcome`, `--agent-outcome-rubric`) |
-| Managed Agents Webhooks (public beta) *(v1.20.0)* | `claude_agents_sdk.py` (`--agent-webhook-register`) |
-| Deployment runs history *(2026-07-09 research)* | `claude_agents_sdk.py` (`--agent-deployment-runs`, `--agent-deployment-run-id`) |
-| User profiles CRUD *(2026-07-09 research)* | `claude_agents_sdk.py` (`--agent-user-profile-list`, `--agent-user-profile-create`) |
-| Server-side model fallback (`fallbacks` param) | `claude_fable5.py` (`--fable5-fallback-chain`) *(v1.15.0)* |
-| Admin API: usage/cost reporting, API key list/revoke | `claude_admin_api.py` *(v1.15.0)* |
-| Compliance API: Activity Feed, chats/files/projects, directory | `claude_compliance_api.py` *(v1.16.0)* |
-
-### Claude apps / product surfaces (non-API products)
-| Product | Module |
-|---|---|
-| Claude Cowork (12 task types) | `cowork.py` |
-| Claude in Excel analog | `claude_excel.py` |
-| Claude in PowerPoint analog | `claude_powerpoint.py` *(v1.15.0)* |
-| Claude in Chrome analog (headless browse loop) | `claude_chrome.py` *(v1.15.0)* |
-
-### Everything else
-Git integration, GitHub integration, cost optimizer, observability/metrics,
-research (deep research style multi-source), RAG, evals, workflows,
-sessions, personalities, interactive REPL, artifacts, projects, resilience
-(retry/circuit breaker), security scanning.
-
-Full per-flag reference: see `README.md`.
+| CLI command coverage | In progress | All supported commands use one typed product API client |
+| TUI streaming | Verified complete for reliability slice | Product-API streaming, cancellation, terminal event guarantees |
+| Web frontend | In progress | Authenticated, CSP-hardened, reconnectable streaming client |
+| Product API | Planned | Versioned API with typed errors, OpenAPI, health, readiness, and idempotency |
+| Authentication | Planned | Product tokens, refresh rotation, revocation, secure local storage |
+| Authorization | Planned | Explicit actor/org/workspace policy enforcement |
+| Provider abstraction | Planned | Provider-neutral domain and adapter interfaces |
+| Conversations | Planned | Durable scoped conversations, messages, attachments, usage |
+| Files | In progress | Authorized upload/download, validation, object storage, lifecycle |
+| Tool execution | In progress | Grants, approvals, isolation, resource limits, cancellation, audit |
+| Jobs and queues | Planned | Durable idempotent jobs with recovery and valid state transitions |
+| Security | In progress | Central validators integrated into every sensitive path |
+| Observability | In progress | Structured logs plus metrics, traces, and correlated audit events |
+| Testing | In progress | Unit, contract, integration, security, migration, and E2E gates |
+| CI/CD | In progress | Reproducible builds, schema drift, migration, image, and smoke gates |
+| Deployment | In progress | Hardened containers, managed secrets, rollback and backup procedures |
+| Documentation | In progress | Generated inventories and continuously verified implementation records |
 
 ---
 
-## Part 2 — Gap Audit vs. platform.claude.com/docs
+## 6. Completed Milestones
 
-Checked 2026-07-04 against the Features overview, API reference, and
-Admin/Usage/Compliance API sections. Six real gaps, ranked by priority.
+These milestones are retained as delivered product capabilities. Their presence does not imply completion of the platform migration.
 
-> **Status update (v1.15.0):** the five buildable gaps below (P0, both
-> P1s, both usage/admin P2s) have been implemented — see
-> `docs/29_upgrade_v1.15.0.md`, `CHANGELOG.md`, and `CHECKLIST.md` for
-> what shipped and Part 1 above for where each landed. Compliance API
-> remained a documented gap, not built, per its own recommendation below.
-> One correction surfaced during implementation: the context-editing gap
-> description below is **inaccurate** — `claude_tools.py` already had a
-> complete `build_context_management()` with `clear_tool_uses` support;
-> the grep that produced this audit missed it. The real gap was that
-> `claude_code.py`'s agent loop never called it. Left as originally
-> written below for an accurate record of the original audit; see the
-> Part 1 table and v1.15.0 docs for the corrected version.
->
-> **Status update (v1.16.0):** the sixth gap, Compliance API, is now
-> also implemented — see `docs/30_upgrade_v1.16.0.md`,
-> `CHANGELOG.md`, and `CHECKLIST.md`. This was the recommendation's own
-> exit condition ("revisit only if there's an actual concrete request
-> for it") being met, not a reversal of the original call to wait.
+### 6.1 Core CLI evolution
 
-> **Status update (v1.19.0):** one new gap found and closed — Managed
-> Agents memory stores. See the v1.19.0 audit cycle note below and
-> `docs/32_upgrade_v1.19.0.md`.
+- Broad Anthropic API and product-feature command surface.
+- Model catalog and capability metadata.
+- Interactive and non-interactive workflows.
+- Files, tools, streaming, batches, structured output, thinking, caching, administration, compliance, evaluations, and agent workflows.
 
-> **Status update (v1.20.0):** three new gaps found and closed —
-> Dreaming, Outcomes, and Webhooks (all Managed Agents features that
-> shipped alongside/after the memory-store feature closed in v1.19.0).
-> A fourth item, native Multiagent orchestration, was confirmed real and
-> absent but deliberately left undocumented-as-built pending a concrete
-> use case — see the v1.20.0 audit cycle note below and
-> `docs/33_upgrade_v1.20.0.md`.
+### 6.2 Cross-platform delivery
 
-> **Status update (web research cycle, 2026-07-09):** eight additional
-> gaps found and closed via deep web research against docs.anthropic.com,
-> platform.claude.com/docs, and anthropic.com/news. All P1-P2: thinking
-> `display: "omitted"` (latency optimization), `effort: "xhigh"` level,
-> web_search/web_fetch version drift (→ 20260318), `response_inclusion`
-> and `use_cache` params on server tools, `code_execution_20260521`
-> advisory, Opus 4.1 upcoming retirement (2026-08-05), refusal category
-> docstring update (`frontier_llm`, `reasoning_extraction`). Full detail
-> in `docs/36_research_claude_updates_2026q2.md`.
+- Windows executable and installer build infrastructure.
+- Linux executable build path.
+- Container build support.
+- CI foundations for testing and packaging.
 
-> **Status update (deep research pass, 2026-07-09):** four more gaps
-> found via SDK changelog cross-reference (v0.76.0–v0.116.0) and deeper
-> product research: `anthropic-user-profile-id` header (multi-tenant
-> attribution), `claude-mythos-preview` missing from model catalog,
-> `output_tokens_details`/`thinking_tokens` capture in streaming and
-> thinking modules, `system_message` streaming event handler. All closed.
-> 15 SDK features confirmed already present. Full detail in
-> `docs/36_research_claude_updates_2026q2.md` Part 7.
+### 6.3 Native artifacts and documents
 
-> **Status update (wiring audit pass, 2026-07-09):** one P1 gap found
-> by auditing CLI flags against actual API request construction:
-> `--effort` was accepted by argparse and used for thinking budgets but
-> never sent as `output_config.effort` on the Messages API request —
-> silently dropped for all non-thinking code paths. Fixed by adding
-> `effort` parameter to `Coder.__init__()` and wiring it to the payload.
-> All other CLI flags confirmed properly wired. Full detail in
-> `docs/36_research_claude_updates_2026q2.md` Part 8.
+- Spreadsheet and presentation workflows.
+- Native DOCX and PDF workflows in later release snapshots.
+- Artifact and project abstractions for local operation.
 
-> **Status update (dependency audit pass, 2026-07-09):** one P2 gap
-> found by auditing third-party dependency defaults: `claude_embeddings.py`
-> defaulted to `voyage-3.5` (superseded by Voyage 4 series, released
-> 2026-01-15). Updated to `voyage-4` with full model listing in docstring.
-> All other module defaults confirmed current. Full detail in
-> `docs/36_research_claude_updates_2026q2.md` Part 9.
+### 6.4 TUI streaming reliability
 
-> **Status update (SDK introspection pass, 2026-07-09):** two new SDK
-> namespaces found by directly inspecting `anthropic` v0.116.0 client:
-> `deployment_runs` (execution history for scheduled deployments) and
-> `user_profiles` (CRUD management for multi-tenant profile records).
-> Both implemented with full CLI flags. 10 other namespaces confirmed
-> already covered. `messages.parse` documented as SDK convenience
-> already covered by `claude_structured.py`. Full detail in
-> `docs/36_research_claude_updates_2026q2.md` Part 10.
-
-### 🔴 P0 — Server-side fallback (`fallbacks` parameter) ✅ IMPLEMENTED (v1.15.0)
-
-**What it is:** A `fallbacks` array in the Messages API request body lets
-you name up to 3 models in one call. If the primary model (e.g. Fable 5)
-returns `stop_reason: "refusal"`, the platform itself retries the *same*
-request against the next model in the list, server-side, in the same
-round trip — no second HTTP call from the client.
-
-**Why it was a gap:** `claude_fable5.py`'s `call_with_fallback()` only
-implemented the *client-side manual* pattern (a second, separate `_post()`
-call to `self.fallback_model`). That's a legitimate documented pattern
-too, but it's a different one from the `fallbacks` param, and at the time
-zaicoder only had the manual path.
-
-**What changed:** `Fable5Client` now takes a `fallback_chain` param; when
-set, `call()` sends `payload["fallbacks"] = fallback_chain` and reads back
-which model in the chain actually served the request instead of making a
-second round trip. `call_with_fallback()` falls through to the legacy
-manual-retry path only when `fallback_chain` is unset. New flag:
-`--fable5-fallback-chain MODEL1,MODEL2`. See `tests/test_claude_fable5.py`
-and `IMPLEMENTATION_CHECKLIST.md` Form 1.
-
-**Original implementation plan (for reference):**
-- Add `fallback_chain: list[str] = None` param to `Fable5Client.__init__`.
-- In `call()`, if `fallback_chain` is set, add `payload["fallbacks"] = fallback_chain`
-  instead of (not in addition to) the manual retry path.
-- `call_with_fallback()` becomes a thin compatibility wrapper: if
-  `fallback_chain` is set, just inspect the response's `stop_reason` and
-  which model actually answered (docs specify the response echoes back
-  which model in the chain served the request); only fall through to the
-  manual retry path if `fallback_chain` is unset.
-- New CLI flag: `--fable5-fallback-chain MODEL1,MODEL2` (up to 3 total
-  including the primary).
-- Update `claude_fable5.py`'s module docstring to explain both patterns and
-  when to use each (manual retry: you want to change the prompt/system
-  before retrying; `fallbacks` param: you want the platform to just handle
-  it).
+- Bounded render cadence.
+- Immediate first-delta display.
+- Threshold-based coalescing.
+- Unconditional final partial-response flush.
+- Deterministic framework-independent streaming tests.
 
 ---
 
-### 🟠 P1 — Context editing ✅ IMPLEMENTED (v1.15.0)
+## 7. Strategic Workstreams
 
-**What it is:** Configurable strategies (`clear_tool_uses`, thinking-block
-handling) that automatically prune the context window mid-conversation —
-distinct from Compaction, which does server-side summarization. Context
-editing *removes* stale tool results/thinking blocks by rule; Compaction
-*summarizes* the conversation. They solve the same problem (long-running
-agent sessions blowing the context window) with different mechanisms and
-are meant to be used together.
+## 7.1 Canonical Product API Client
 
-**Why it was a gap:** `claude_code.py` and `claude_tools.py` both had
-Compaction. Neither had a `context_management` block in any payload.
+**Priority:** P0  
+**Outcome:** CLI, TUI, web, and automation clients share one typed client library.
 
-**Correction during implementation:** the audit's premise that context
-editing was entirely missing turned out to be *partly* wrong — a
-`build_context_management()` helper already existed in `claude_tools.py`
-with no caller wiring it up. The real gap was narrower than described:
-finish wiring it into both agent loops, not build it from scratch.
+Required capabilities:
 
-**What changed:** `context_management` (with `clear_tool_uses` and
-thinking-block handling) is now wired into both `claude_code.py`'s and
-`claude_tools.py`'s agent loops via `--agent-context-editing` /
-`use_context_management`, used alongside (not instead of) Compaction. See
-`IMPLEMENTATION_CHECKLIST.md` Form 2 and `CHANGELOG.md`.
+- Product authentication and token refresh.
+- Base URL and API-version negotiation.
+- Request and correlation IDs.
+- Idempotency keys.
+- Safe bounded retries with jitter.
+- Timeouts and cancellation.
+- Pagination.
+- Multipart and streaming upload.
+- SSE or equivalent streaming protocol.
+- Typed product errors.
+- User-agent and client-version metadata.
+- Debug logging with secret redaction.
 
----
+Completion requires removal of duplicated raw HTTP logic from client-facing commands.
 
-### 🟠 P1 — Agent Skills via the API (`skill_id`, not Claude Code's local loader) ✅ IMPLEMENTED (v1.15.0)
+## 7.2 Provider-Neutral Domain and Adapters
 
-**What it is:** A platform-level Skills feature distinct from Claude
-Code's local `.claude/skills/*/SKILL.md` convention: Anthropic-provided
-pre-built Skills (PowerPoint, Excel, Word, PDF generation/editing) plus
-custom Skills, referenced by `skill_id` in a Messages API request and
-loaded server-side with progressive disclosure (the model only pulls in
-skill content as needed rather than the whole thing up front).
+**Priority:** P0  
+**Outcome:** application services do not depend on provider SDK types.
 
-**Why it was a gap:** `claude_code.py`'s skill loader
-(`_load_skills_from_dir`) was real but was Claude Code's *local
-filesystem* convention — it reads a directory on the caller's machine and
-stuffs `SKILL.md` content into context itself. Nothing sent `skill_id` in
-a request, listed available Skills, or uploaded a custom Skill.
+Domain types include:
 
-**What changed:** `claude_skills_api.py` wraps the List/Create/Delete
-Skills endpoints and builds the `skill_id` container reference for a
-Messages request (`--skills-list`, `--skills-info ID`). The originally
-planned follow-up also shipped in the same cycle: `claude_excel.py` and
-`claude_powerpoint.py` gained `--excel-native` / `--pptx-native` flags
-that route through the Anthropic-maintained pre-built Skill instead of
-the local pandas/openpyxl or python-pptx loop, with the hand-rolled
-implementation kept as the no-Skills-access fallback. See
-`tests/test_claude_skills_api.py` and `IMPLEMENTATION_CHECKLIST.md` Form 3.
+- Model and capability metadata.
+- Conversation and message content blocks.
+- Tool calls and tool results.
+- Stream events and terminal states.
+- Usage and stop reasons.
+- Provider errors and retry metadata.
 
----
+The Anthropic implementation becomes the first adapter. Additional providers can be added without modifying CLI or core application logic.
 
-### 🟡 P2 — Usage and Cost API ✅ IMPLEMENTED (v1.15.0)
+## 7.3 Versioned Product API
 
-**What it is:** Org-level endpoints for querying actual historical spend
-and usage (as opposed to estimating it from token counts you already have
-locally).
+**Priority:** P0  
+**Outcome:** one stable server boundary for every product surface.
 
-**Why it was a gap:** `claude_cost_optimizer.py` only did local estimation
-from token counts it was told about — it never called a usage/cost
-endpoint.
+Initial API domains:
 
-**What changed:** folded into `claude_admin_api.py` (grouped with API key
-management below, since both are thin Admin-API wrappers with the same
-auth requirements) rather than a separate `claude_usage_api.py` module.
-`get_usage_report(start, end, group_by)` and a matching cost-report call,
-`--usage-report` / `--cost-report` CLI flags (plus `-start`/`-end`/
-`-group-by`), and `claude_cost_optimizer.py`'s docstring cross-links to
-it. Requires an Admin API key, not a regular one — the CLI help text
-flags this so it doesn't silently 401. See `tests/test_claude_admin_api.py`.
+- health, liveness, readiness, and version;
+- auth and sessions;
+- users, organizations, and workspaces;
+- model catalog and capabilities;
+- conversations and messages;
+- streaming generation;
+- files and attachments;
+- tools, grants, and approvals;
+- jobs, events, cancellation, and retry;
+- usage and audit.
 
----
+OpenAPI must be generated or validated against runtime schemas in CI.
 
-### 🟡 P2 — API key management (Admin API) ✅ IMPLEMENTED (v1.15.0)
+## 7.4 CLI and TUI Migration
 
-**What it is:** Programmatic create/list/rotate/revoke for API keys at the
-organization level.
+**Priority:** P0  
+**Outcome:** no provider SDK or provider secret is required on the client.
 
-**Why it was a gap:** No code anywhere touched this endpoint family.
+Migration will proceed in vertical slices:
 
-**What changed:** added to `claude_admin_api.py` alongside the Usage/Cost
-API above — `--admin-list-keys`, `--admin-revoke-key ID` (update status to
-revoke). Anthropic does not document a create-key endpoint (keys are
-created through the Console UI, where the secret is shown exactly once —
-creating one programmatically would be an exfiltration risk), so
-`--admin-create-key NAME` is deliberately wired to an explanatory refusal
-rather than a silent no-op or a fake success; see
-`cmd_admin_create_key()`'s docstring in `claude_admin_api.py`.
+1. model catalog and health;
+2. non-streaming prompt execution;
+3. streaming chat and cancellation;
+4. conversation continuity;
+5. files and attachments;
+6. tools and approvals;
+7. asynchronous jobs;
+8. administration and usage.
 
----
+Compatibility aliases may remain temporarily, but all active paths must converge on the typed product API client.
 
-### 🟡 P2 — Compliance API ✅ IMPLEMENTED (v1.16.0)
+## 7.5 Authentication and Authorization
 
-**What it is:** Org-level compliance/audit-log endpoints.
+**Priority:** P0  
+**Outcome:** explicit product identity, scoped access, and revocation.
 
-**Why it was a gap:** No matches anywhere in the tree, at the time this
-audit was written (2026-07-04) — probably because the Compliance API
-hadn't shipped yet, not because the audit missed it.
+- Secure login and logout.
+- Short-lived access tokens.
+- Rotating refresh tokens.
+- Revocation and session inventory.
+- Secure OS credential storage for CLI clients.
+- Role- or policy-based access control.
+- Organization and workspace isolation.
+- Authorization on every mutating operation.
+- Audit records for auth and policy decisions.
 
-**Why P2, and why it was originally left as just a gap:** Least likely
-of the six to matter for a personal/small-team coding CLI — built for
-enterprise compliance teams, not developers. Guessing at endpoint shapes
-without a concrete use case risked building the wrong thing, so the
-original recommendation was to wait for one.
+## 7.6 Conversations, Persistence, and Jobs
 
-**What changed:** the exit condition in that recommendation ("revisit
-only if there's an actual concrete request for it") was met. Implemented
-in `claude_compliance_api.py` — Activity Feed, chats/files/projects
-read+hard-delete (dry-run by default, `--compliance-yes` required),
-directory endpoints, and the documented retry/pagination-cursor
-contract. See `docs/30_upgrade_v1.16.0.md` and `CHECKLIST.md`.
+**Priority:** P1  
+**Outcome:** durable, recoverable workflows.
 
----
+- Scoped conversation and message storage.
+- Partial, final, failed, and cancelled message states.
+- Attachment metadata and lifecycle.
+- Durable job queue.
+- Validated job state machine.
+- Idempotent submission and retry.
+- Cancellation propagation.
+- Worker recovery after process restart.
+- Transactional state transitions.
 
-### 🟠 P1 — Managed Agents memory stores ✅ IMPLEMENTED (v1.19.0)
+## 7.7 Tool Policy, Approval, and Sandbox
 
-**What it is:** A workspace-scoped, persistent, versioned file directory
-(`memory_store`) that can be mounted into a Managed Agents session via the
-`resources` param. Every write gets an immutable version for audit/
-point-in-time recovery. Public beta, requires the `agent-memory-2026-07-22`
-beta header (in addition to `managed-agents-2026-04-01`).
+**Priority:** P0  
+**Outcome:** tools cannot execute outside explicit policy.
 
-**Why it was a gap:** `claude_agents_sdk.py`'s `ManagedAgentsClient` had
-`create_agent`/`create_environment`/`create_session`/`run_task` but nothing
-touched a `memory_stores` endpoint, and `create_session` never sent a
-`resources` param at all.
+Every tool execution must validate:
 
-**Why P1, not P2:** without it, every Managed Agents session in zaicoder is
-necessarily stateless past the one throwaway session `cmd_managed_agent_run`
-creates — there's no supported way for a hosted agent's work to survive
-into a second session. That's a capability gap for the CLI's stated use
-case (multi-session agentic coding), not just an admin/reporting nicety.
+- registry membership and schema;
+- user authorization;
+- workspace policy;
+- explicit grants;
+- approval requirement and expiry;
+- filesystem, network, and command policy;
+- CPU, memory, timeout, and output limits.
 
-**Why this isn't a duplicate of existing "memory" features:** zaicoder
-already has two other things called "memory" — `claude_memory.py`'s
-`memory_20250818` client-side tool, and Claude Code's local
-`.claude`/`MEMORY.md` auto-memory. Both are real, different features, not
-this one: the client-side tool requires the caller's own app to implement
-storage and is scoped to a single Messages API conversation; Claude Code's
-auto-memory never leaves the developer's machine. Managed Agents memory
-stores are the only one of the three that's Anthropic-hosted, versioned,
-and shared across a Managed Agents agent's sessions.
+Default policy is deny. File and shell operations require path containment, symlink handling, command policy, cancellation, redaction, and auditable outcomes.
 
-**What changed:** `ManagedAgentsClient.create_memory_store(name)` wraps
-`client.beta.memory_stores.create`; `create_session()` gained an optional
-`memory_store_id` param that, when set, adds a
-`{"type": "memory_store", "memory_store_id": ...}` entry to `resources`
-and includes the new beta header. New CLI flags: `--agent-memory-store
-NAME` (create/reuse and mount into `--agent-managed-run`'s session) and
-`--agent-memory-store-create` (create a store standalone, for reuse
-across multiple later runs under the same name). See
-`tests/test_claude_agents_sdk.py` and `IMPLEMENTATION_CHECKLIST.md`
-Form 9.
+## 7.8 Files and Attachments
 
----
+**Priority:** P1  
+**Outcome:** secure authorized file lifecycle.
 
-## Priority Summary
+- Multipart and streaming upload.
+- Configurable size limits through one canonical validator.
+- MIME and extension validation.
+- Filename sanitization.
+- Content hashing and optional deduplication.
+- Authorized object storage.
+- Signed download URLs where appropriate.
+- Text extraction and supported document processing.
+- Malware-scanning integration boundary.
+- Retention and cleanup policies.
 
-### 🟠 P1 — Managed Agents Dreaming ✅ IMPLEMENTED (v1.20.0)
+## 7.9 Web Frontend
 
-**What it is:** A research-preview process that reads a memory store
-alongside past session transcripts and produces a new, curated output
-memory store: duplicates merged, stale/contradicted entries replaced,
-recurring patterns promoted to top-level memories. Requires the
-`dreaming-2026-04-21` beta header in addition to `managed-agents-2026-04-01`.
+**Priority:** P1  
+**Outcome:** production browser client using the same product API.
 
-**Why it was a gap:** `claude_agents_sdk.py`'s `ManagedAgentsClient`
-gained `create_memory_store`/`create_session` memory-store wiring in
-v1.19.0 but nothing touched a `dreams` endpoint. A first grep for
-`dream` found nothing; a second, differently-worded grep for
-`curat|reflect.*session|memory.*consolidat` also came up empty before
-this was written up as a real gap.
+- Shared API contract and generated types.
+- Secure authentication flow.
+- No provider secrets in browser state or bundles.
+- CSP and safe rendering.
+- CSRF strategy where cookies are used.
+- Streaming reconnect and cancellation.
+- File-upload progress and validation.
+- Accessible keyboard and screen-reader behavior.
+- Explicit loading, failure, retry, and terminal states.
+- Frontend unit and browser E2E tests.
 
-**Why P1, not P2:** without it, a memory store only ever accumulates —
-there's no supported way to clean up duplicates/staleness short of
-manually calling `memories.delete` one at a time. For any Managed
-Agents workflow that runs long enough to make memory stores worth using
-at all, that's a capability gap, not just a nicety.
+## 7.10 Security Hardening
 
-**What changed:** `ManagedAgentsClient.create_dream(memory_store_id,
-session_ids=None, model=..., instructions=None)` wraps
-`client.beta.dreams.create`; `.get_dream()`, `.list_dreams()`, and
-`.cancel_dream()` wrap the matching read/list/cancel endpoints. New CLI
-flags: `--agent-dream STORE_ID` (+ `--agent-dream-sessions`,
-`--agent-dream-instructions`), `--agent-dream-list`, `--agent-dream-get
-DREAM_ID`. See `tests/test_claude_agents_sdk.py` and
-`IMPLEMENTATION_CHECKLIST.md` Form 10.
+**Priority:** P0  
+**Outcome:** centralized controls are enforced, not merely defined.
 
----
+- Integrate path, URL, identifier, secret, and file-size validators.
+- Remove duplicated conflicting limits.
+- Eliminate unsafe default shell execution.
+- Enforce explicit approval semantics for every permission mode.
+- Redact credentials and sensitive provider payloads.
+- Apply rate limits and abuse controls.
+- Protect against SSRF, path traversal, command injection, and malicious uploads.
+- Use non-root containers and least-privilege runtime identities.
+- Add dependency, secret, and container scanning.
 
-### 🟠 P1 — Managed Agents Outcomes ✅ IMPLEMENTED (v1.20.0)
+## 7.11 Observability and Audit
 
-**What it is:** A `user.define_outcome` session event (description +
-rubric + `max_iterations`) that starts a rubric-graded self-correction
-loop: a separate grader model evaluates the agent's work against the
-rubric in its own context window, and the agent revises until the
-grader is satisfied or `max_iterations` is hit. Public beta, no extra
-beta header beyond `managed-agents-2026-04-01`.
+**Priority:** P1  
+**Outcome:** every request and execution can be traced safely.
 
-**Why it was a gap:** `ManagedAgentsClient.run_task()` only ever sent a
-plain `user.message` event and stopped at `session.status_idle` — there
-was no code path that sent `user.define_outcome` or handled
-`span.outcome_evaluation_*` events. Confirmed absent with a grep for
-`define_outcome|outcome_evaluation|rubric` before writing this up.
+- Structured logs.
+- Request, correlation, trace, conversation, and job IDs.
+- Metrics for API/provider latency, tokens, errors, retries, active streams, jobs, and queue depth.
+- Distributed tracing across API, provider, database, queue, and workers.
+- Immutable or append-oriented audit events.
+- Secret and sensitive-content redaction.
+- Operational dashboards and alert guidance.
 
-**Why P1, not P2:** this is a different, independently-gradeable
-execution mode for the CLI's core Managed Agents use case (autonomous
-coding tasks), not an admin/reporting convenience — it changes what
-"done" means for a session, from "the agent stopped talking" to "an
-independent grader confirmed the rubric is met."
+## 7.12 Testing and Release Engineering
 
-**What changed:** `ManagedAgentsClient.define_outcome(session_id,
-description, rubric_text, max_iterations=3)` sends the event;
-`.wait_for_outcome(session_id)` streams until a terminal
-`span.outcome_evaluation_end`. `cmd_managed_agent_run()` gained opt-in
-`outcome_description`/`outcome_rubric`/`outcome_max_iterations` params —
-when both description and rubric are given it runs the outcome loop
-instead of `run_task()`; otherwise behavior is unchanged. New flags:
-`--agent-outcome DESC`, `--agent-outcome-rubric FILE`,
-`--agent-outcome-max-iter N`. See `tests/test_claude_agents_sdk.py` and
-`IMPLEMENTATION_CHECKLIST.md` Form 10.
+**Priority:** P0  
+**Outcome:** every supported path is reproducible and gated.
+
+Required suites:
+
+- unit;
+- CLI;
+- API contract;
+- provider adapter;
+- persistence and migration;
+- authorization and tenant isolation;
+- deterministic streaming;
+- file security;
+- tool approval and sandbox;
+- job idempotency, retry, recovery, and cancellation;
+- frontend and browser E2E;
+- container and deployment smoke tests.
+
+CI must reject schema drift, migration failures, leaked secrets, disabled tests without justification, and packaging regressions.
 
 ---
 
-### 🟡 P2 — Managed Agents Webhooks ✅ IMPLEMENTED (v1.20.0)
+## 8. Release Milestones
 
-**What it is:** Subscribe a URL to Managed Agents lifecycle events
-(session, outcome, dream) so a long-running task doesn't need a client
-holding an SSE stream open. Public beta.
+### Milestone A — Architecture Foundation
 
-**Why it was a gap:** No code anywhere called a `webhooks` endpoint;
-confirmed with a grep for `webhook` finding only an unrelated comment.
+- Canonical domain models.
+- Typed error contract.
+- Product API client foundation.
+- Provider adapter interface.
+- Initial versioned API skeleton.
+- Health, readiness, version, and model catalog.
 
-**Why P2:** the CLI's existing `run_task()`/`wait_for_outcome()` stream
-patterns cover the CLI's own single-process use case adequately;
-webhooks matter most for server-side integrations outside this CLI's
-current scope, similar in kind to the Usage/Cost and API-key-management
-P2s from earlier cycles.
+**Exit criterion:** CLI can query product health and models without provider credentials.
 
-**What changed:** `ManagedAgentsClient.register_webhook(url,
-event_types=None)` wraps `client.beta.webhooks.create`. New flags:
-`--agent-webhook-register URL`, `--agent-webhook-events LIST`. See
-`tests/test_claude_agents_sdk.py` and `IMPLEMENTATION_CHECKLIST.md`
-Form 10.
+### Milestone B — Core Chat Through Product API
+
+- Non-streaming messages.
+- Streaming events.
+- Cancellation.
+- Usage and stop reasons.
+- Conversation persistence.
+- CLI and TUI migration for chat paths.
+
+**Exit criterion:** prompt and interactive chat use only the product API.
+
+### Milestone C — Secure Files and Tools
+
+- Authorized attachments.
+- Tool registry and schema validation.
+- Grants and approval state machine.
+- Sandboxed workers and resource limits.
+- Audit events.
+
+**Exit criterion:** mutating tools cannot run without valid policy and approval.
+
+### Milestone D — Durable Jobs and Operations
+
+- Job queue and workers.
+- Idempotency and retries.
+- Recovery and cancellation.
+- Metrics and tracing.
+- Hardened deployment topology.
+
+**Exit criterion:** jobs survive process restarts and remain auditable.
+
+### Milestone E — Unified Web Product
+
+- Authenticated browser experience.
+- Shared generated types.
+- Streaming and uploads.
+- Administration and usage views.
+- Browser security and E2E tests.
+
+**Exit criterion:** web and CLI expose consistent product semantics.
+
+### Milestone F — Production General Availability
+
+- Full security review.
+- Capacity and failure testing.
+- Backup and restore validation.
+- Upgrade and rollback rehearsal.
+- Release artifacts and support policy.
+
+**Exit criterion:** every production definition-of-done item is evidenced in CI or release records.
 
 ---
 
-### 🟡 P2 — Managed Agents native Multiagent orchestration ⏸ DEFERRED (v1.20.0)
+## 9. Technical Debt Register
 
-**What it is:** A lead/specialist coordinator topology configured on
-the Agent resource itself (`multiagent: {type: "coordinator", agents:
-[...]}`), where a lead agent decomposes a task and delegates to up to
-20 specialist subagents running in parallel *inside the same Managed
-Agents session*, sharing one filesystem and one event stream. Public
-beta.
+The following debt must be tracked until removed or explicitly accepted:
 
-**Why it looked like a gap:** `claude_agents_sdk.py` already has
-`--agent-orchestrate` / `ManagedAgent.orchestrate()` /
-`spawn_subagent()`, but that's a client-side pattern: it makes separate
-Messages API calls per subagent from the local process, with no shared
-Managed Agents session, no shared sandbox filesystem, and no
-`multiagent` field on any Agent resource. A grep for
-`multiagent|coordinator.*agents|"type".*"coordinator"` confirmed zero
-matches for the native feature, so this is a real, additional gap on
-top of the existing client-side orchestration — not a rename of it.
+- Flat module layout and very large CLI dispatch surface.
+- Provider-specific imports distributed across client-facing modules.
+- Multiple request-construction and retry implementations.
+- Documentation inventory and version drift.
+- Security helpers that are not universally integrated.
+- Conflicting file-size and path-validation behavior.
+- Permission modes whose runtime semantics require explicit verification.
+- Shell execution relying on optional or best-effort filtering.
+- Local state formats without durable migration policy.
+- Framework route handlers and feature flags not represented in a generated dependency map.
+- Tests that validate wiring but not complete runtime behavior.
 
-**Why deferred rather than built:** the native feature's value is
-specifically the shared-sandbox, shared-event-stream, in-session
-delegation model — subagents that can all read/write the same files and
-that the lead agent can "check back in with... mid-workflow." Building
-a faithful wrapper means designing how `claude_agents_sdk.py` exposes
-per-subagent model/prompt/tool configuration and multi-thread event
-handling, which is a meaningfully larger surface than the other three
-gaps closed this cycle, and zaicoder doesn't yet have a concrete
-multi-subagent-in-one-session use case to build it against (the
-existing `--agent-orchestrate` already covers "decompose a goal into
-independent subtasks" for zaicoder's actual usage patterns). Same
-reasoning the Compliance API used between v1.15.0 and v1.16.0.
-
-**Exit condition:** revisit if there's an actual concrete need for
-subagents to share a live sandbox/filesystem within a single Managed
-Agents session, rather than the current independent-Messages-API-calls
-pattern.
+Debt entries are closed only when implementation, regression tests, and documentation land together.
 
 ---
 
-## Priority Summary
+## 10. Breaking-Change Policy
 
-| Priority | Item | Rationale |
-|---|---|---|
-| 🔴 P0 | Server-side `fallbacks` param | ✅ Done v1.15.0 — strictly better than the prior client-side-only fallback |
-| 🟠 P1 | Context editing | ✅ Done v1.15.0 — wired existing `build_context_management()` into `claude_code.py` |
-| 🟠 P1 | Agent Skills API (`skill_id`) | ✅ Done v1.15.0 — plus the `--excel-native`/`--pptx-native` follow-up in the same cycle |
-| 🟡 P2 | Usage and Cost API | ✅ Done v1.15.0 — folded into `claude_admin_api.py` |
-| 🟡 P2 | API key management | ✅ Done v1.15.0 — same module; no create-key (Anthropic doesn't expose one) |
-| 🟡 P2 | Compliance API | ✅ Done v1.16.0 — exit condition ("concrete request") was met |
-| 🟠 P1 | Mid-conversation system messages | ✅ Done v1.18.0 — new in `claude_cache.py`, Opus 4.8 only |
-| 🟡 P2 | Cache diagnostics CLI wiring | ✅ Done v1.18.0 — client support existed since ~v1.10.x, `--cache-diagnose` was the missing piece |
-| 🟠 P1 | Managed Agents memory stores | ✅ Done v1.19.0 — new in `claude_agents_sdk.py`, distinct from the two other "memory" features already in the tree |
-| 🟠 P1 | Managed Agents Dreaming | ✅ Done v1.20.0 — research preview, curates a memory store's contents without modifying the input store |
-| 🟠 P1 | Managed Agents Outcomes | ✅ Done v1.20.0 — public beta, rubric-graded self-correction loop, opt-in alternative to plain `run_task()` |
-| 🟡 P2 | Managed Agents Webhooks | ✅ Done v1.20.0 — public beta, out-of-band notifications alongside existing SSE stream patterns |
-| 🟡 P2 | Managed Agents native Multiagent orchestration | ⏸ Deferred v1.20.0 — confirmed real, larger surface than the other three, no concrete use case yet |
+A breaking change requires:
 
-Every buildable item raised by an audit cycle to date has been closed;
-one (native Multiagent orchestration) is a documented, deliberate defer
-with a stated exit condition, matching how the Compliance API gap was
-handled between v1.15.0 and v1.16.0. See the v1.20.0 audit note below
-for how this cycle's items were found.
+1. documented motivation;
+2. affected commands, API routes, schemas, and configuration keys;
+3. migration procedure;
+4. deprecation or compatibility window where practical;
+5. rollback plan;
+6. automated compatibility tests;
+7. release-note entry.
 
-## v1.18.0 audit cycle (2026-07-08)
+Provider-specific flags may be retained as deprecated aliases while clients migrate to provider-neutral product fields.
 
-Re-ran the methodology below against the live docs. Two real findings,
-both closed in this cycle — see `CHANGELOG.md` and
-`docs/31_upgrade_v1.18.0.md` for the full writeup:
+---
 
-- **Mid-conversation system messages** — genuinely absent (zero matches
-  for `role.*system` anywhere in the tree outside test fixtures). New,
-  Opus-4.8-only feature: `role: "system"` messages appended mid-`messages`
-  to update instructions without invalidating a cached prefix. Added
-  `build_mid_system_message()`, `validate_system_message_placement()`
-  (encodes all five documented placement rules), and threaded a
-  `mid_system` / `mid_system_updates` param through both
-  `generate_cached()` and `multi_turn_cached()` in `claude_cache.py`.
+## 11. Progress Reporting
 
-- **Cache diagnostics (beta) — CLI wiring only.** The initial grep for
-  `cache_diagnostic`/`cache.diagnostic` found nothing and looked like a
-  fresh gap, but the feature itself (`diagnose=` param, `cache-diagnosis-
-  2026-04-07` beta header, `cache_miss_reason` surfaced via
-  `cache_stats()`) was already fully implemented in `claude_cache.py` —
-  the grep pattern just didn't match the actual identifier names used
-  (`diagnose`, `diagnostics`, `cache_miss_reason`). The real, narrower gap:
-  nothing in `main.py` ever set `diagnose=True`, so the feature was
-  unreachable from the CLI. Added `--cache-diagnose`.
+Progress is reported by completed acceptance criteria, not estimated percentages.
 
-Also checked for drift (not just net-new features) per this cycle's
-methodology: `claude_models.py`'s catalog (Fable 5, Mythos 5, Opus 4.8,
-Sonnet 5, Haiku 4.5, legacy tiers) matches the live Models overview
-exactly — no stale entries, no missing releases. No `requirements.txt`
-version drift found either.
+### Verified complete
 
-`claude_cache.py` had zero test coverage before this cycle; added
-`tests/test_claude_cache.py` (18 tests) covering both the pre-existing
-caching behavior and both features closed above.
+- Cross-platform build foundations.
+- Broad local CLI capability surface.
+- TUI streaming reliability slice.
 
-## v1.19.0 audit cycle (2026-07-08)
+### Active priority
 
-Re-ran the methodology below against the live docs. One real finding,
-closed in this cycle — see `CHANGELOG.md` and
-`docs/32_upgrade_v1.19.0.md` for the full writeup:
+- Canonical product API client.
+- Provider-neutral domain boundary.
+- Versioned product API foundation.
+- Security integration for local tools and filesystem operations.
 
-- **Managed Agents memory stores** — genuinely absent. Found not by
-  grepping the docs' feature list directly but by checking
-  `requirements.txt`'s SDK-pin drift first (per this cycle's step 6):
-  `anthropic-sdk-python` v0.116.0's release notes mention a new
-  `agent-memory-2026-07-22` beta header, which led to the Managed
-  Agents memory-store docs pages. A first grep for `memory_store`
-  confirmed zero matches, and a second, differently-worded grep for
-  `memory.?store|agent-memory|resources.*memory` also came up empty
-  before concluding it was a real gap, per this cycle's step 3.
+### Planned next
 
-Checked for false positives on the two other names in the tree that
-contain "memory" (`claude_memory.py`'s `memory_20250818` tool,
-Claude Code's local `MEMORY.md` auto-memory) before writing the gap —
-neither implements the `memory_store` resource type or talks to a
-`memory_stores` endpoint, so this was not a case of the grep missing an
-existing implementation under a different name.
+- CLI/TUI chat migration.
+- Conversations and durable persistence.
+- Files and attachments.
+- Tool grants and approvals.
+- Durable jobs and workers.
+- Unified web frontend.
+- Full observability and production operations.
 
-Also checked for drift (not just net-new features) per this cycle's
-methodology: `claude_models.py`'s catalog still matches the live Models
-overview exactly — no stale entries, no missing releases. The
-`requirements.txt` pin (`anthropic>=0.75.0`) itself needed no change
-(it's a floor, not an exact pin, and the installed/available SDK
-version is well above it) — but checking the SDK's own changelog for
-drift, rather than just the pin string, is what surfaced the memory-store
-gap above.
+---
 
-`claude_agents_sdk.py` had zero test coverage before this cycle; added
-`tests/test_claude_agents_sdk.py` (10 tests) covering both pre-existing
-behavior (`PermissionMode`, `TOOL_PRESETS`, the `MANAGED_AGENTS_BETA`
-header) and the new memory-store support closed above.
+## 12. Production Definition of Done
 
-## v1.20.0 audit cycle (2026-07-08)
+ZAI Coder is production-ready only when all applicable statements are true:
 
-Re-ran the methodology below against the live docs. Per this cycle's
-step 6, re-checked the Managed Agents docs for what shipped alongside
-the memory-store feature closed in v1.19.0 (the v1.19.0 note had
-flagged "Dreaming" as a name seen mentioned nearby but not yet
-investigated). That led to three real, closed findings and one real,
-deferred finding:
+- [ ] CLI, TUI, and web clients use only the product API.
+- [ ] Client packages do not import provider SDKs.
+- [ ] Provider secrets are server-side and managed through an approved secret store.
+- [ ] Runtime schemas and OpenAPI pass drift validation.
+- [ ] Access-token refresh, rotation, revocation, and secure client storage are tested.
+- [ ] Every durable record is correctly scoped and authorized.
+- [ ] Every mutating operation is authorized and audited.
+- [ ] Every stream emits exactly one terminal event.
+- [ ] Cancellation propagates through client, API, provider or worker, and persistence.
+- [ ] Idempotent operations do not create duplicate side effects.
+- [ ] File paths, URLs, names, sizes, and content types are validated centrally.
+- [ ] Tool grants and approvals are explicit, expiring, and tested.
+- [ ] Shell and filesystem tools run under enforceable isolation and resource limits.
+- [ ] Logs, traces, metrics, errors, and audit events redact secrets.
+- [ ] Database migrations pass from empty and supported previous versions.
+- [ ] Unit, contract, integration, security, frontend, and E2E tests pass.
+- [ ] CLI, server, frontend, and container production builds pass.
+- [ ] Health and readiness checks verify real dependencies.
+- [ ] Backup, restore, upgrade, and rollback procedures are rehearsed.
+- [ ] Documentation reflects the shipped behavior and current source version.
+- [ ] No material production TODO, placeholder, mock-only path, or unexplained disabled test remains.
 
-- **Dreaming** — genuinely absent (research preview). A first grep for
-  `dream` found zero matches; a second, differently-worded grep for
-  `curat|reflect.*session|memory.*consolidat` also came up empty before
-  concluding it was a real gap, per this cycle's step 3.
-- **Outcomes** — genuinely absent (public beta). A first grep for
-  `define_outcome` found zero matches; a second grep for
-  `outcome_evaluation|rubric` also came up empty.
-- **Webhooks** — genuinely absent (public beta). A grep for `webhook`
-  matched only an unrelated comment in `claude_agents_sdk.py`'s
-  docstring noting the *existing* SSE-stream approach as an alternative
-  to webhooks — not an implementation.
-- **Native Multiagent orchestration** — genuinely absent as a Managed
-  Agents Agent-resource feature (`multiagent: {type: "coordinator", ...}`).
-  Confirmed this is not the same as the pre-existing client-side
-  `--agent-orchestrate` (checked both greps and read the code directly,
-  per this cycle's step 4, since `orchestrate`/`Orchestrator` appear
-  throughout `claude_agents_sdk.py` already and a naive grep could have
-  produced a false "already covered"). Real gap, but deliberately
-  deferred — see the Priority Summary section above for the full
-  reasoning and exit condition.
+---
 
-Also checked for drift (not just net-new features) per this cycle's
-methodology: `claude_models.py`'s catalog still matches the live Models
-overview exactly (Fable 5, Mythos 5, Opus 4.8, Sonnet 5, Haiku 4.5, plus
-the legacy 4.5/4.6/4.7 tiers) — no stale entries, no missing releases,
-no new retirements beyond what's already in `RETIRED_MODELS`. The
-`requirements.txt` floor pin (`anthropic>=0.75.0`) needed no change.
+## 13. Governance
 
-`claude_agents_sdk.py` already had test coverage from v1.19.0; added 16
-more tests to `tests/test_claude_agents_sdk.py` (26 total in that file)
-covering Dreaming, Outcomes, and Webhooks.
+- `ROADMAP.md` owns product direction and milestone status.
+- `docs/migration/execution-plan.md` owns implementation order and acceptance gates.
+- Architecture decision records own irreversible or cross-cutting decisions.
+- OpenAPI and generated clients own external API contracts.
+- CI and release records own verification evidence.
 
-## What's explicitly *not* on this roadmap
-
-Everything in Part 1's coverage tables. If it's checked off there, it's
-implemented and tested, not just planned.
-
-## Methodology note
-
-This audit was produced by fetching the live Features overview and API
-reference from `platform.claude.com/docs` (checked 2026-07-08) and grepping
-the zaicoder source tree for the concrete API surface of each feature —
-parameter names (`fallbacks`, `skill_id`, `clear_tool_uses`, `diagnostics`,
-`role: "system"`), endpoint paths, and beta header strings — rather than
-trusting module docstrings or README changelog entries at face value.
-Where a docstring claimed coverage that the grep didn't confirm, the grep
-won — except where the grep itself was wrong (see the Cache diagnostics
-correction above): confirm with a second, differently-worded grep before
-concluding a feature is missing, not just one pattern match.
+Changes that alter the target architecture, security model, persistence model, or public API require corresponding updates to both this roadmap and the execution plan.
