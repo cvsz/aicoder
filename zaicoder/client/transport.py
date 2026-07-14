@@ -3,8 +3,9 @@
 import json
 import time
 import uuid
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, Mapping, Optional
+from typing import Any, Callable, Optional
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
@@ -71,16 +72,17 @@ class ProductAPITransport:
         path: str,
         *,
         payload: Optional[Mapping[str, Any]] = None,
+        request_id: Optional[str] = None,
         correlation_id: Optional[str] = None,
         idempotency_key: Optional[str] = None,
     ) -> Any:
-        request_id = str(uuid.uuid4())
-        headers: Dict[str, str] = {
+        resolved_request_id = request_id or str(uuid.uuid4())
+        headers: dict[str, str] = {
             "Accept": "application/json",
             "User-Agent": self.config.user_agent,
             "X-API-Version": self.config.api_version,
-            "X-Request-ID": request_id,
-            "X-Correlation-ID": correlation_id or request_id,
+            "X-Request-ID": resolved_request_id,
+            "X-Correlation-ID": correlation_id or resolved_request_id,
         }
         if self.config.access_token:
             headers["Authorization"] = f"Bearer {self.config.access_token}"
@@ -122,5 +124,7 @@ class ProductAPITransport:
             try:
                 envelope = ErrorEnvelope.from_dict(response.json())
             except (ValueError, TypeError, KeyError, json.JSONDecodeError) as exc:
-                raise RuntimeError(f"Product API returned HTTP {response.status_code} without a valid error envelope") from exc
+                raise RuntimeError(
+                    f"Product API returned HTTP {response.status_code} without a valid error envelope"
+                ) from exc
             raise ProductAPIError(envelope, response.status_code)

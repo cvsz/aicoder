@@ -1,4 +1,6 @@
 anthropic>=0.116.0
+textual>=0.80.0
+socksio>=1.0.0
 # 0.116.0+ needed for client.beta.agents / .environments / .sessions
 # (Claude Managed Agents — see claude_agents_sdk.ManagedAgentsClient),
 # client.beta.deployment_runs (v1.23.0), client.beta.user_profiles

@@ -6,6 +6,14 @@ high-level index. Two project lineages (`zai-coder-cli-v1`, the modular
 single-`coder.py` CLI with its own PyInstaller packaging) were merged into
 this release; see "v1.12.0" below for exactly what came from where.
 
+## Unreleased
+
+**Product API CLI operational controls**: `zai-coder-api` now accepts
+`--api-version`, `--api-timeout`, `--api-max-retries`, `--request-id`, and
+`--correlation-id`. The canonical client preserves supplied request context
+for JSON and SSE calls. `--debug` reports only request metadata; it never
+prints Product API access tokens or provider credentials.
+
 ## v1.23.0 — Deep Web Research Cycle (18 gaps closed)
 
 Seven-pass deep web research against docs.anthropic.com, anthropic.com/news,

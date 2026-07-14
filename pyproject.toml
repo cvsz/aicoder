@@ -37,6 +37,7 @@ ignore = ["E501"]
 [tool.black]
 line-length = 110
 target-version = ["py39"]
+extend-exclude = "^/(\\.venv|\\.venv-check|venv|env)/"
 
 [tool.mypy]
 python_version = "3.9"
