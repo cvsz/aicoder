@@ -86,6 +86,7 @@ def _assistant_text(payload: Mapping[str, Any]) -> str:
 
 
 def _runtime_from_args(args: argparse.Namespace) -> ProductAPIRuntimeConfig:
+    _validate_runtime_args(args)
     runtime = ProductAPIRuntimeConfig.from_environment()
     return replace(
         runtime,
@@ -93,6 +94,13 @@ def _runtime_from_args(args: argparse.Namespace) -> ProductAPIRuntimeConfig:
         timeout_seconds=args.api_timeout if args.api_timeout is not None else runtime.timeout_seconds,
         max_retries=args.api_max_retries if args.api_max_retries is not None else runtime.max_retries,
     )
+
+
+def _validate_runtime_args(args: argparse.Namespace) -> None:
+    if args.api_timeout is not None and args.api_timeout <= 0:
+        raise ValueError("--api-timeout must be positive")
+    if args.api_max_retries is not None and args.api_max_retries < 0:
+        raise ValueError("--api-max-retries must be non-negative")
 
 
 def _write_debug(stderr: TextIO, *, request_id: str, correlation_id: str) -> None:
@@ -111,6 +119,7 @@ def run(
 ) -> int:
     args = build_parser().parse_args(argv)
     try:
+        _validate_runtime_args(args)
         request_id = args.request_id or str(uuid.uuid4())
         correlation_id = args.correlation_id or request_id
         if args.debug:

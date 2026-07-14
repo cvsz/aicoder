@@ -5,12 +5,14 @@ import uuid
 from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from typing import Callable, Optional, Protocol
+from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
-from zaicoder.domain import StreamEvent, StreamSequenceValidator
+from zaicoder.domain import ErrorEnvelope, StreamEvent, StreamSequenceValidator
 
 from .config import ClientConfig
 from .streaming import EventStreamParser
+from .transport import ProductAPIError
 
 
 class CancellationSignal(Protocol):
@@ -66,7 +68,16 @@ class ProductAPIStreamTransport:
             headers=headers,
             method="POST",
         )
-        response = self.opener(request, self.config.timeout_seconds)
+        try:
+            response = self.opener(request, self.config.timeout_seconds)
+        except HTTPError as exc:
+            try:
+                envelope = ErrorEnvelope.from_dict(json.loads(exc.read().decode("utf-8")))
+            except (ValueError, TypeError, KeyError, json.JSONDecodeError) as parse_error:
+                raise RuntimeError(
+                    f"Product API stream returned HTTP {exc.code} without a valid error envelope"
+                ) from parse_error
+            raise ProductAPIError(envelope, int(exc.code)) from exc
         parser = EventStreamParser()
         validator = StreamSequenceValidator()
         try:
