@@ -52,15 +52,19 @@ class StaticTokenAuthenticator:
 class AuthMiddleware:
     """Enforce public/private route policy before dispatching to the application."""
 
-    PUBLIC_PATHS = frozenset({"/v1/health", "/v1/live", "/v1/ready", "/v1/version"})
-    REQUIRED_SCOPES: Mapping[str, FrozenSet[str]] = {"/v1/models": frozenset({"models:read"})}
+    PUBLIC_SUFFIXES = frozenset({"/health", "/live", "/ready", "/version"})
+    REQUIRED_SCOPE_SUFFIXES: Mapping[str, FrozenSet[str]] = {
+        "/models": frozenset({"models:read"}),
+        "/messages": frozenset({"messages:write"}),
+        "/messages:stream": frozenset({"messages:write"}),
+    }
 
     def __init__(self, app: ProductAPIHandler, authenticator: StaticTokenAuthenticator) -> None:
         self.app = app
         self.authenticator = authenticator
 
     def handle(self, request: ProductAPIRequest) -> ProductAPIResponse:
-        if request.path in self.PUBLIC_PATHS:
+        if any(request.path.endswith(suffix) for suffix in self.PUBLIC_SUFFIXES):
             return self.app.handle(request)
 
         request_id = request.headers.get("X-Request-ID") or str(uuid.uuid4())
@@ -76,7 +80,11 @@ class AuthMiddleware:
                 www_authenticate=True,
             )
 
-        required = self.REQUIRED_SCOPES.get(request.path, frozenset())
+        required = frozenset()
+        for suffix, scopes in self.REQUIRED_SCOPE_SUFFIXES.items():
+            if request.path.endswith(suffix):
+                required = scopes
+                break
         missing = required.difference(principal.scopes)
         if missing:
             return self._error(
