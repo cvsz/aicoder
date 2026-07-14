@@ -31,6 +31,13 @@
         "required": ["error"],
         "type": "object"
       }
+    },
+    "securitySchemes": {
+      "bearerAuth": {
+        "bearerFormat": "opaque product access token",
+        "scheme": "bearer",
+        "type": "http"
+      }
     }
   },
   "info": {
@@ -42,7 +49,7 @@
   "paths": {
     "/v1/health": {"get": {"operationId": "health", "responses": {"200": {"content": {"application/json": {"schema": {"type": "object"}}}, "description": "Successful response", "headers": {"X-API-Version": {"schema": {"type": "string"}}, "X-Correlation-ID": {"schema": {"type": "string"}}, "X-Request-ID": {"schema": {"type": "string"}}}}}, "summary": "Health check"}},
     "/v1/live": {"get": {"operationId": "live", "responses": {"200": {"content": {"application/json": {"schema": {"type": "object"}}}, "description": "Successful response", "headers": {"X-API-Version": {"schema": {"type": "string"}}, "X-Correlation-ID": {"schema": {"type": "string"}}, "X-Request-ID": {"schema": {"type": "string"}}}}}, "summary": "Liveness check"}},
-    "/v1/models": {"get": {"operationId": "models", "responses": {"200": {"content": {"application/json": {"schema": {"type": "object"}}}, "description": "Successful response", "headers": {"X-API-Version": {"schema": {"type": "string"}}, "X-Correlation-ID": {"schema": {"type": "string"}}, "X-Request-ID": {"schema": {"type": "string"}}}}}, "summary": "Provider-neutral model catalog"}},
+    "/v1/models": {"get": {"operationId": "models", "responses": {"200": {"content": {"application/json": {"schema": {"type": "object"}}}, "description": "Successful response", "headers": {"X-API-Version": {"schema": {"type": "string"}}, "X-Correlation-ID": {"schema": {"type": "string"}}, "X-Request-ID": {"schema": {"type": "string"}}}}, "401": {"$ref": "#/components/responses/ProductError"}, "403": {"$ref": "#/components/responses/ProductError"}}, "security": [{"bearerAuth": []}], "summary": "Provider-neutral model catalog"}},
     "/v1/ready": {"get": {"operationId": "ready", "responses": {"200": {"content": {"application/json": {"schema": {"type": "object"}}}, "description": "Successful response", "headers": {"X-API-Version": {"schema": {"type": "string"}}, "X-Correlation-ID": {"schema": {"type": "string"}}, "X-Request-ID": {"schema": {"type": "string"}}}}, "503": {"$ref": "#/components/responses/ProductError"}}, "summary": "Readiness check"}},
     "/v1/version": {"get": {"operationId": "version", "responses": {"200": {"content": {"application/json": {"schema": {"type": "object"}}}, "description": "Successful response", "headers": {"X-API-Version": {"schema": {"type": "string"}}, "X-Correlation-ID": {"schema": {"type": "string"}}, "X-Request-ID": {"schema": {"type": "string"}}}}}, "summary": "Product and API version"}}
   },

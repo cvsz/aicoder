@@ -36,6 +36,16 @@ def build_openapi_schema(product_version: str = "1.23.0") -> Dict[str, Any]:
         **success_response,
         "503": {"$ref": "#/components/responses/ProductError"},
     }
+    paths["/v1/models"]["get"].update(
+        {
+            "security": [{"bearerAuth": []}],
+            "responses": {
+                **success_response,
+                "401": {"$ref": "#/components/responses/ProductError"},
+                "403": {"$ref": "#/components/responses/ProductError"},
+            },
+        }
+    )
     return {
         "openapi": "3.0.3",
         "info": {
@@ -46,6 +56,13 @@ def build_openapi_schema(product_version: str = "1.23.0") -> Dict[str, Any]:
         "servers": [{"url": "/"}],
         "paths": paths,
         "components": {
+            "securitySchemes": {
+                "bearerAuth": {
+                    "type": "http",
+                    "scheme": "bearer",
+                    "bearerFormat": "opaque product access token",
+                }
+            },
             "schemas": {
                 "ProductError": {
                     "type": "object",
