@@ -16,7 +16,9 @@ _STATUS_TEXT = {
     403: "Forbidden",
     404: "Not Found",
     405: "Method Not Allowed",
+    422: "Unprocessable Entity",
     500: "Internal Server Error",
+    502: "Bad Gateway",
     503: "Service Unavailable",
 }
 
@@ -34,6 +36,18 @@ def _request_headers(environ: Mapping[str, object]) -> Dict[str, str]:
     return headers
 
 
+def _request_body(environ: Mapping[str, object]) -> bytes:
+    stream = environ.get("wsgi.input")
+    if stream is None or not hasattr(stream, "read"):
+        return b""
+    raw_length = environ.get("CONTENT_LENGTH")
+    try:
+        length = int(str(raw_length)) if raw_length not in (None, "") else 0
+    except ValueError:
+        length = 0
+    return stream.read(length) if length > 0 else b""
+
+
 class ProductAPIWSGI:
     """Expose a Product API handler through a synchronous WSGI boundary."""
 
@@ -44,7 +58,12 @@ class ProductAPIWSGI:
         method = str(environ.get("REQUEST_METHOD", "GET"))
         path = str(environ.get("PATH_INFO", "/"))
         response = self.application.handle(
-            ProductAPIRequest(method=method, path=path, headers=_request_headers(environ))
+            ProductAPIRequest(
+                method=method,
+                path=path,
+                headers=_request_headers(environ),
+                body=_request_body(environ),
+            )
         )
         status_text = _STATUS_TEXT.get(response.status_code, "Unknown")
         headers = list(response.headers.items())
