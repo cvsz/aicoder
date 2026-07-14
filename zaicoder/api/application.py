@@ -3,7 +3,7 @@
 import json
 import uuid
 from dataclasses import dataclass, field
-from typing import Any, Dict, Iterable, Mapping, Optional, Sequence
+from typing import Any, Mapping, Sequence
 
 from zaicoder.domain import ErrorEnvelope, ModelDescriptor, ProductError
 
@@ -52,11 +52,13 @@ class ProductAPIApplication:
         }
         if request.method.upper() != "GET":
             return self._error(405, "method_not_allowed", "Method not allowed", request_id, correlation_id)
+        if request.path == "/v1/ready" and not self.ready:
+            return self._error(503, "not_ready", "Service is not ready", request_id, correlation_id)
 
         routes = {
             "/v1/health": lambda: {"status": "ok"},
             "/v1/live": lambda: {"status": "ok"},
-            "/v1/ready": lambda: {"status": "ready" if self.ready else "not_ready"},
+            "/v1/ready": lambda: {"status": "ready"},
             "/v1/version": lambda: {
                 "product_version": self.product_version,
                 "api_version": self.api_version,
@@ -67,10 +69,7 @@ class ProductAPIApplication:
         if handler is None:
             return self._error(404, "not_found", "Route not found", request_id, correlation_id)
         payload = handler()
-        status = 200
-        if request.path == "/v1/ready" and not self.ready:
-            status = 503
-        return ProductAPIResponse(status, headers, json.dumps(payload, separators=(",", ":")).encode("utf-8"))
+        return ProductAPIResponse(200, headers, json.dumps(payload, separators=(",", ":")).encode("utf-8"))
 
     @staticmethod
     def _error(
