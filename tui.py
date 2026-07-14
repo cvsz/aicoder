@@ -1,12 +1,4 @@
-"""
-tui.py — Full interactive terminal UI for zcoder, built on Textual.
-
-Launched via `python main.py --tui` (see main.py). This is a second front
-end alongside the plain-argparse CLI and the FastAPI web console
-(webapp/), reusing the same core as the other surfaces.
-
-No business logic lives here; this module is presentation only.
-"""
+"""Interactive Textual UI backed exclusively by the Product API."""
 from __future__ import annotations
 
 import time
@@ -17,32 +9,26 @@ try:
     from textual.app import App, ComposeResult
     from textual.containers import Horizontal, Vertical, VerticalScroll
     from textual.widgets import Button, Footer, Header, Input, Label, Select, Static, Switch
-except ImportError as exc:  # pragma: no cover - exercised only without textual
-    raise ImportError(
-        "The --tui flag needs the 'textual' package, which isn't installed.\n"
-        "Install it with: pip install textual>=0.80.0"
-    ) from exc
+except ImportError as exc:  # pragma: no cover
+    raise ImportError("The --tui flag needs textual>=0.80.0") from exc
 
 from claude_models import MODEL_CATALOG
-from config import Config
 from personalities import PersonalityManager
 from skills import SkillManager
 from tui_streaming import StreamRenderGate
-
+from zaicoder.client import ProductAPIClient
+from zaicoder.client.runtime import build_product_api_client
+from zaicoder.domain import StreamEventType
 
 DEFAULT_MODEL = "claude-sonnet-5"
 
 
 def _agent_prompts() -> dict:
-    # Imported lazily to avoid a circular import: main.py imports tui.py.
     from main import AGENT_SYSTEM_PROMPTS
-
     return AGENT_SYSTEM_PROMPTS
 
 
 class ChatMessage(Static):
-    """A single rendered turn in the transcript."""
-
     def __init__(self, role: str, text: str = ""):
         super().__init__(self._format(role, text), markup=False)
         self.role = role
@@ -60,48 +46,30 @@ class ChatMessage(Static):
 
 
 class SessionSidebar(Vertical):
-    """Model and session controls for the interactive terminal UI."""
-
     def compose(self) -> ComposeResult:
-        model_options = [
-            (f"{info.get('display_name', model_id)} ({info.get('tier', '')})", model_id)
-            for model_id, info in MODEL_CATALOG.items()
-        ]
-        personality_options = [("none", "")] + [
-            (personality["name"], personality["name"])
-            for personality in PersonalityManager().list_personalities()
-        ]
-        agent_options = [("none", "")] + [(name, name) for name in _agent_prompts()]
-        skill_options = [("none", "")] + [
-            (skill["name"], skill["name"]) for skill in SkillManager().list_skills()
-        ]
-
+        model_options = [(f"{info.get('display_name', mid)} ({info.get('tier', '')})", mid) for mid, info in MODEL_CATALOG.items()]
+        personalities = [("none", "")] + [(p["name"], p["name"]) for p in PersonalityManager().list_personalities()]
+        agents = [("none", "")] + [(name, name) for name in _agent_prompts()]
+        skills = [("none", "")] + [(s["name"], s["name"]) for s in SkillManager().list_skills()]
         yield Label("model", classes="side-label")
         yield Select(model_options, value=DEFAULT_MODEL, id="model_select")
         yield Label("personality", classes="side-label")
-        yield Select(personality_options, value="", id="personality_select")
+        yield Select(personalities, value="", id="personality_select")
         yield Label("agent role", classes="side-label")
-        yield Select(agent_options, value="", id="agent_select")
+        yield Select(agents, value="", id="agent_select")
         yield Label("skill focus", classes="side-label")
-        yield Select(skill_options, value="", id="skill_select")
-        yield Label("temperature: 0.3", id="temp_label", classes="side-label")
-        yield Input(value="0.3", id="temp_input", placeholder="0.0 - 1.0")
+        yield Select(skills, value="", id="skill_select")
+        yield Label("temperature: 0.3", classes="side-label")
+        yield Input(value="0.3", id="temp_input")
         with Horizontal(classes="stream-row"):
             yield Label("stream", classes="side-label")
             yield Switch(value=True, id="stream_switch")
 
 
 class ZCoderTUI(App):
-    """Interactive chat TUI using the same request semantics as the CLI."""
-
     CSS = """
     Screen { layout: horizontal; }
-    #sidebar {
-        width: 32;
-        border-right: solid $panel-darken-2;
-        padding: 1 2;
-        overflow-y: auto;
-    }
+    #sidebar { width: 32; border-right: solid $panel-darken-2; padding: 1 2; overflow-y: auto; }
     #main { width: 1fr; }
     #transcript { padding: 1 2; }
     .side-label { color: $text-muted; text-style: bold; margin-top: 1; }
@@ -113,17 +81,18 @@ class ZCoderTUI(App):
     .msg-error { color: $error; margin: 1 0 0 0; }
     .msg-system { color: $text-muted; margin: 1 0 0 0; }
     """
+    BINDINGS = [("ctrl+n", "new_session", "New session"), ("ctrl+q", "quit", "Quit"), ("ctrl+t", "toggle_dark", "Toggle theme")]
 
-    BINDINGS = [
-        ("ctrl+n", "new_session", "New session"),
-        ("ctrl+q", "quit", "Quit"),
-        ("ctrl+t", "toggle_dark", "Toggle theme"),
-    ]
-
-    def __init__(self, api_key: Optional[str] = None):
+    def __init__(self, client: Optional[ProductAPIClient] = None):
         super().__init__()
-        self.api_key = api_key or Config().get("api_key")
-        self.history: list = []
+        self.client = client
+        self.client_error: Optional[str] = None
+        if self.client is None:
+            try:
+                self.client = build_product_api_client()
+            except ValueError as exc:
+                self.client_error = str(exc)
+        self.history: list[dict] = []
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
@@ -133,25 +102,15 @@ class ZCoderTUI(App):
             with Vertical(id="main"):
                 yield VerticalScroll(id="transcript")
                 with Horizontal(id="input_row"):
-                    yield Input(
-                        placeholder="Ask ZAI Coder anything… (Enter to send)",
-                        id="prompt_input",
-                    )
+                    yield Input(placeholder="Ask ZAI Coder anything…", id="prompt_input")
                     yield Button("run", id="send_btn", variant="primary")
         yield Footer()
 
     def on_mount(self) -> None:
-        self.query_one("#transcript").mount(
-            ChatMessage("system", "ZAI Coder TUI ready.")
-        )
-        if not self.api_key:
-            self.query_one("#transcript").mount(
-                ChatMessage(
-                    "error",
-                    "No ANTHROPIC_API_KEY configured — set the environment variable "
-                    "or run `python main.py --setup`.",
-                )
-            )
+        transcript = self.query_one("#transcript")
+        transcript.mount(ChatMessage("system", "ZAI Coder TUI ready via Product API."))
+        if self.client_error:
+            transcript.mount(ChatMessage("error", f"Product API unavailable: {self.client_error}"))
         self.query_one("#prompt_input").focus()
 
     def action_new_session(self) -> None:
@@ -164,144 +123,91 @@ class ZCoderTUI(App):
         self.theme = "textual-light" if self.theme == "textual-dark" else "textual-dark"
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
-        if event.input.id == "prompt_input":
-            self._send()
+        if event.input.id == "prompt_input": self._send()
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
-        if event.button.id == "send_btn":
-            self._send()
+        if event.button.id == "send_btn": self._send()
 
     def _selected(self, widget_id: str) -> str:
         value = self.query_one(f"#{widget_id}", Select).value
         return value if value not in (None, Select.BLANK) else ""
 
     def _temperature(self) -> float:
-        raw = self.query_one("#temp_input", Input).value.strip()
-        try:
-            temperature = float(raw)
-        except ValueError:
-            temperature = 0.3
-        return max(0.0, min(1.0, temperature))
+        try: value = float(self.query_one("#temp_input", Input).value.strip())
+        except ValueError: value = 0.3
+        return max(0.0, min(1.0, value))
 
     def _build_system_prompt(self) -> Optional[str]:
         parts = []
         agent = self._selected("agent_select")
-        if agent:
-            parts.append(_agent_prompts().get(agent, ""))
+        if agent: parts.append(_agent_prompts().get(agent, ""))
         skill = self._selected("skill_select")
         if skill:
             info = SkillManager().get_skill(skill)
-            if info:
-                parts.append(f"Apply the '{info['name']}' skill: {info['description']}")
+            if info: parts.append(f"Apply the '{info['name']}' skill: {info['description']}")
         personality = self._selected("personality_select")
-        if personality:
-            parts.append(PersonalityManager().build_prompt_addition(personality))
-        return "\n\n".join(part for part in parts if part) or None
+        if personality: parts.append(PersonalityManager().build_prompt_addition(personality))
+        return "\n\n".join(p for p in parts if p) or None
 
     def _send(self) -> None:
         prompt_input = self.query_one("#prompt_input", Input)
         text = prompt_input.value.strip()
-        if not text or not self.api_key:
-            return
+        if not text or self.client is None: return
         prompt_input.value = ""
         transcript = self.query_one("#transcript")
         transcript.mount(ChatMessage("user", text))
-        transcript.scroll_end(animate=False)
+        reply = ChatMessage("assistant", "…")
+        transcript.mount(reply)
+        self._run_generation(text, self._selected("model_select") or DEFAULT_MODEL, self._build_system_prompt(), self._temperature(), self.query_one("#stream_switch", Switch).value, reply)
 
-        model = self._selected("model_select") or DEFAULT_MODEL
-        system = self._build_system_prompt()
-        temperature = self._temperature()
-        streaming = self.query_one("#stream_switch", Switch).value
-
-        reply_widget = ChatMessage("assistant", "…")
-        transcript.mount(reply_widget)
-        transcript.scroll_end(animate=False)
-
-        self._run_generation(text, model, system, temperature, streaming, reply_widget)
+    def _payload(self, prompt: str, model: str, system: Optional[str], temperature: float) -> dict:
+        messages = list(self.history) + [{"role": "user", "content": [{"type": "text", "text": prompt}]}]
+        if system:
+            messages.insert(0, {"role": "system", "content": [{"type": "text", "text": system}]})
+        return {"model": model, "messages": messages, "max_output_tokens": 4096, "metadata": {"temperature": temperature, "surface": "tui"}}
 
     @work(exclusive=False, thread=True)
-    def _run_generation(
-        self,
-        prompt,
-        model,
-        system,
-        temperature,
-        streaming,
-        reply_widget,
-    ) -> None:
-        history_snapshot = list(self.history)
+    def _run_generation(self, prompt, model, system, temperature, streaming, reply_widget) -> None:
+        payload = self._payload(prompt, model, system, temperature)
         try:
-            if streaming:
-                full_text = self._stream_reply(
-                    prompt,
-                    model,
-                    system,
-                    temperature,
-                    history_snapshot,
-                    reply_widget,
-                )
-            else:
-                from coder import Coder
-
-                coder = Coder(api_key=self.api_key, model=model, temperature=temperature)
-                full_text = coder.generate(prompt, system=system, history=history_snapshot)
-                self.call_from_thread(reply_widget.update_text, full_text)
-        except Exception as exc:  # keep the TUI alive on generation failure
+            full_text = self._stream_reply(payload, reply_widget) if streaming else self._create_reply(payload)
+            self.call_from_thread(reply_widget.update_text, full_text)
+        except Exception as exc:
             full_text = f"[ERROR] {exc}"
             self.call_from_thread(reply_widget.update_text, full_text)
             self.call_from_thread(reply_widget.add_class, "msg-error")
+        self.history += [{"role": "user", "content": [{"type": "text", "text": prompt}]}, {"role": "assistant", "content": [{"type": "text", "text": full_text}]}]
 
-        self.history = history_snapshot + [
-            {"role": "user", "content": prompt},
-            {"role": "assistant", "content": full_text},
-        ]
+    def _create_reply(self, payload: dict) -> str:
+        assert self.client is not None
+        result = self.client.create_message(payload)
+        blocks = result.get("message", {}).get("content", [])
+        return "".join(str(block.get("text", "")) for block in blocks if block.get("type") == "text")
 
-    def _stream_reply(self, prompt, model, system, temperature, history, reply_widget) -> str:
-        import anthropic
-
-        client = anthropic.Anthropic(api_key=self.api_key)
-        messages = list(history) + [{"role": "user", "content": prompt}]
-        kwargs = {"model": model, "max_tokens": 4096, "messages": messages}
-        if system:
-            kwargs["system"] = system
-        if 0.0 <= temperature <= 1.0:
-            kwargs["temperature"] = temperature
-
+    def _stream_reply(self, payload: dict, reply_widget) -> str:
+        assert self.client is not None
         full_text = ""
-        render_gate = StreamRenderGate()
+        gate = StreamRenderGate()
         try:
-            with client.messages.stream(**kwargs) as stream:
-                for event in stream:
-                    if getattr(event, "type", "") != "content_block_delta":
-                        continue
-                    delta = event.delta
-                    if getattr(delta, "type", "") != "text_delta":
-                        continue
-                    text = getattr(delta, "text", "")
+            for event in self.client.stream_message(payload):
+                if event.type is StreamEventType.CONTENT_DELTA:
+                    text = str(event.data.get("text", ""))
                     full_text += text
-                    if render_gate.should_render(text, time.monotonic()):
+                    if gate.should_render(text, time.monotonic()):
                         self.call_from_thread(reply_widget.update_text, full_text)
-                        self.call_from_thread(
-                            self.query_one("#transcript").scroll_end,
-                            animate=False,
-                        )
-        except Exception as exc:
-            full_text = full_text or f"[ERROR] {exc}"
+                elif event.type is StreamEventType.STREAM_FAILED:
+                    raise RuntimeError(str(event.data.get("message", "Product API stream failed")))
+                elif event.type is StreamEventType.STREAM_CANCELLED:
+                    break
         finally:
-            # The final provider delta may arrive before the next render interval
-            # or character threshold. Flush unconditionally so visible output and
-            # persisted history cannot diverge.
             self.call_from_thread(reply_widget.update_text, full_text)
-            self.call_from_thread(
-                self.query_one("#transcript").scroll_end,
-                animate=False,
-            )
         return full_text
 
 
-def run_tui(api_key: Optional[str] = None) -> None:
-    """Entry point used by main.py's --tui flag."""
-    ZCoderTUI(api_key=api_key).run()
+def run_tui(api_key: Optional[str] = None, client: Optional[ProductAPIClient] = None) -> None:
+    """Backward-compatible entry point; api_key is intentionally ignored."""
+    del api_key
+    ZCoderTUI(client=client).run()
 
 
 if __name__ == "__main__":  # pragma: no cover
