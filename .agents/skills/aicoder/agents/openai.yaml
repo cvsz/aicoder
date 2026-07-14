@@ -1,0 +1,6 @@
+interface:
+  display_name: "Aicoder"
+  short_description: "Repo-specific patterns and workflows for aicoder"
+  default_prompt: "Use the aicoder repo skill to follow existing architecture, testing, and workflow conventions."
+policy:
+  allow_implicit_invocation: true
