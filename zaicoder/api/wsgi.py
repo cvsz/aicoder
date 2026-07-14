@@ -4,13 +4,16 @@ from __future__ import annotations
 
 from typing import Callable, Dict, Iterable, List, Mapping, Tuple
 
-from .application import ProductAPIApplication, ProductAPIRequest
+from .application import ProductAPIRequest
+from .auth import ProductAPIHandler
 
 StartResponse = Callable[[str, List[Tuple[str, str]]], object]
 
 _STATUS_TEXT = {
     200: "OK",
     400: "Bad Request",
+    401: "Unauthorized",
+    403: "Forbidden",
     404: "Not Found",
     405: "Method Not Allowed",
     500: "Internal Server Error",
@@ -32,9 +35,9 @@ def _request_headers(environ: Mapping[str, object]) -> Dict[str, str]:
 
 
 class ProductAPIWSGI:
-    """Expose :class:`ProductAPIApplication` through a synchronous WSGI boundary."""
+    """Expose a Product API handler through a synchronous WSGI boundary."""
 
-    def __init__(self, application: ProductAPIApplication) -> None:
+    def __init__(self, application: ProductAPIHandler) -> None:
         self.application = application
 
     def __call__(self, environ: Mapping[str, object], start_response: StartResponse) -> Iterable[bytes]:
