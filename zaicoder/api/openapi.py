@@ -46,6 +46,41 @@ def build_openapi_schema(product_version: str = "1.23.0") -> Dict[str, Any]:
             },
         }
     )
+    generation_request = {
+        "required": True,
+        "content": {"application/json": {"schema": {"$ref": "#/components/schemas/GenerationRequest"}}},
+    }
+    generation_errors = {
+        "401": {"$ref": "#/components/responses/ProductError"},
+        "403": {"$ref": "#/components/responses/ProductError"},
+        "422": {"$ref": "#/components/responses/ProductError"},
+        "502": {"$ref": "#/components/responses/ProductError"},
+        "503": {"$ref": "#/components/responses/ProductError"},
+    }
+    paths["/v1/messages"] = {
+        "post": {
+            "summary": "Generate an assistant message",
+            "operationId": "create_message",
+            "security": [{"bearerAuth": []}],
+            "requestBody": generation_request,
+            "responses": {**success_response, **generation_errors},
+        }
+    }
+    paths["/v1/messages:stream"] = {
+        "post": {
+            "summary": "Stream canonical message events",
+            "operationId": "stream_message",
+            "security": [{"bearerAuth": []}],
+            "requestBody": generation_request,
+            "responses": {
+                "200": {
+                    "description": "Canonical server-sent event stream",
+                    "content": {"text/event-stream": {"schema": {"type": "string"}}},
+                },
+                **generation_errors,
+            },
+        }
+    }
     return {
         "openapi": "3.0.3",
         "info": {
@@ -64,6 +99,16 @@ def build_openapi_schema(product_version: str = "1.23.0") -> Dict[str, Any]:
                 }
             },
             "schemas": {
+                "GenerationRequest": {
+                    "type": "object",
+                    "required": ["model", "messages"],
+                    "properties": {
+                        "model": {"type": "string", "minLength": 1},
+                        "messages": {"type": "array", "minItems": 1, "items": {"type": "object"}},
+                        "max_output_tokens": {"type": "integer", "minimum": 1, "default": 1024},
+                        "metadata": {"type": "object", "additionalProperties": True},
+                    },
+                },
                 "ProductError": {
                     "type": "object",
                     "required": ["error"],
@@ -81,16 +126,12 @@ def build_openapi_schema(product_version: str = "1.23.0") -> Dict[str, Any]:
                             },
                         }
                     },
-                }
+                },
             },
             "responses": {
                 "ProductError": {
                     "description": "Typed Product API error",
-                    "content": {
-                        "application/json": {
-                            "schema": {"$ref": "#/components/schemas/ProductError"}
-                        }
-                    },
+                    "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ProductError"}}},
                 }
             },
         },
