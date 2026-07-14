@@ -9,6 +9,7 @@ __all__ = [
     "AuthMiddleware",
     "Principal",
     "ProductAPIApplication",
+    "ProductAPIAuthMiddleware",
     "ProductAPIRequest",
     "ProductAPIResponse",
     "ProductAPIWSGI",
