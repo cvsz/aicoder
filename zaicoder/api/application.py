@@ -3,9 +3,11 @@
 import json
 import uuid
 from dataclasses import dataclass, field
-from typing import Any, Mapping, Sequence
+from typing import Any, Mapping, Optional, Sequence
 
 from zaicoder.domain import ErrorEnvelope, ModelDescriptor, ProductError
+from zaicoder.providers import ProviderError
+from zaicoder.services import ModelCatalogService
 
 
 @dataclass(frozen=True)
@@ -34,11 +36,13 @@ class ProductAPIApplication:
         product_version: str,
         api_version: str = "v1",
         models: Sequence[ModelDescriptor] = (),
+        model_catalog: Optional[ModelCatalogService] = None,
         ready: bool = True,
     ) -> None:
         self.product_version = product_version
-        self.api_version = api_version
+        self.api_version = api_version.strip("/")
         self.models = tuple(models)
+        self.model_catalog = model_catalog
         self.ready = ready
 
     def handle(self, request: ProductAPIRequest) -> ProductAPIResponse:
@@ -52,32 +56,59 @@ class ProductAPIApplication:
         }
         if request.method.upper() != "GET":
             return self._error(405, "method_not_allowed", "Method not allowed", request_id, correlation_id)
-        if request.path == "/v1/ready" and not self.ready:
+
+        prefix = f"/{self.api_version}"
+        if request.path == f"{prefix}/ready" and not self.ready:
             return self._error(503, "not_ready", "Service is not ready", request_id, correlation_id)
 
         routes = {
-            "/v1/health": lambda: {"status": "ok"},
-            "/v1/live": lambda: {"status": "ok"},
-            "/v1/ready": lambda: {"status": "ready"},
-            "/v1/version": lambda: {
+            f"{prefix}/health": lambda: {"status": "ok"},
+            f"{prefix}/live": lambda: {"status": "ok"},
+            f"{prefix}/ready": lambda: {"status": "ready"},
+            f"{prefix}/version": lambda: {
                 "product_version": self.product_version,
                 "api_version": self.api_version,
             },
-            "/v1/models": lambda: {"data": [model.to_dict() for model in self.models]},
+            f"{prefix}/models": self._models_payload,
         }
         handler = routes.get(request.path)
         if handler is None:
             return self._error(404, "not_found", "Route not found", request_id, correlation_id)
-        payload = handler()
+        try:
+            payload = handler()
+        except ProviderError as exc:
+            return self._error(
+                503 if exc.retryable else 502,
+                exc.code.value,
+                exc.message,
+                request_id,
+                correlation_id,
+                retryable=exc.retryable,
+            )
+        except ValueError:
+            return self._error(
+                502,
+                "provider_invalid_response",
+                "Provider returned an invalid model catalog",
+                request_id,
+                correlation_id,
+                retryable=False,
+            )
         return ProductAPIResponse(200, headers, json.dumps(payload, separators=(",", ":")).encode("utf-8"))
 
-    @staticmethod
+    def _models_payload(self) -> Mapping[str, Any]:
+        models = self.model_catalog.list_models() if self.model_catalog is not None else self.models
+        return {"data": [model.to_dict() for model in models]}
+
     def _error(
+        self,
         status_code: int,
         code: str,
         message: str,
         request_id: str,
         correlation_id: str,
+        *,
+        retryable: Optional[bool] = None,
     ) -> ProductAPIResponse:
         envelope = ErrorEnvelope(
             ProductError(
@@ -85,7 +116,7 @@ class ProductAPIApplication:
                 message=message,
                 request_id=request_id,
                 correlation_id=correlation_id,
-                retryable=status_code >= 500,
+                retryable=status_code >= 500 if retryable is None else retryable,
             )
         )
         return ProductAPIResponse(
@@ -94,7 +125,7 @@ class ProductAPIApplication:
                 "Content-Type": "application/json",
                 "X-Request-ID": request_id,
                 "X-Correlation-ID": correlation_id,
-                "X-API-Version": "v1",
+                "X-API-Version": self.api_version,
             },
             json.dumps(envelope.to_dict(), separators=(",", ":")).encode("utf-8"),
         )
