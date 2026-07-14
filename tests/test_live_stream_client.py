@@ -70,7 +70,13 @@ def test_anthropic_adapter_stops_reading_after_cancellation():
 def test_live_stream_transport_parses_incrementally_and_closes_resource():
     frames = [
         {"type": "stream.started", "sequence": 0, "request_id": "r", "correlation_id": "c", "data": {}},
-        {"type": "content.delta", "sequence": 1, "request_id": "r", "correlation_id": "c", "data": {"text": "hi"}},
+        {
+            "type": "content.delta",
+            "sequence": 1,
+            "request_id": "r",
+            "correlation_id": "c",
+            "data": {"text": "hi"},
+        },
         {"type": "stream.completed", "sequence": 2, "request_id": "r", "correlation_id": "c", "data": {}},
     ]
     wire = b"".join(b"data: " + json.dumps(frame).encode() + b"\n\n" for frame in frames)
@@ -85,6 +91,26 @@ def test_live_stream_transport_parses_incrementally_and_closes_resource():
         StreamEventType.STREAM_COMPLETED,
     ]
     assert handle.closed is True
+
+
+def test_live_stream_transport_preserves_explicit_request_context():
+    captured = {}
+    frame = {"type": "stream.completed", "sequence": 0, "request_id": "r", "correlation_id": "c", "data": {}}
+    handle = FakeHandle([b"data: " + json.dumps(frame).encode() + b"\n\n"])
+    transport = ProductAPIStreamTransport(
+        ClientConfig(base_url="https://product.invalid"),
+        opener=lambda request, timeout: captured.update(headers=dict(request.header_items())) or handle,
+    )
+
+    list(
+        transport.stream_events(
+            "/messages:stream", {"model": "m"}, request_id="req-cli", correlation_id="corr-cli"
+        )
+    )
+
+    headers = {key.lower(): value for key, value in captured["headers"].items()}
+    assert headers["x-request-id"] == "req-cli"
+    assert headers["x-correlation-id"] == "corr-cli"
 
 
 def test_product_client_requires_configured_stream_transport():

@@ -2,8 +2,9 @@
 
 import json
 import uuid
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
-from typing import Callable, Dict, Iterable, Iterator, Mapping, Optional, Protocol
+from typing import Callable, Optional, Protocol
 from urllib.request import Request, urlopen
 
 from zaicoder.domain import StreamEvent, StreamSequenceValidator
@@ -14,19 +15,16 @@ from .streaming import EventStreamParser
 
 class CancellationSignal(Protocol):
     @property
-    def cancelled(self) -> bool:
-        ...
+    def cancelled(self) -> bool: ...
 
 
 class StreamHandle(Protocol):
     status: int
     headers: Mapping[str, str]
 
-    def read(self, size: int = -1) -> bytes:
-        ...
+    def read(self, size: int = -1) -> bytes: ...
 
-    def close(self) -> None:
-        ...
+    def close(self) -> None: ...
 
 
 StreamOpener = Callable[[Request, float], StreamHandle]
@@ -47,17 +45,18 @@ class ProductAPIStreamTransport:
         path: str,
         payload: Mapping[str, object],
         *,
+        request_id: Optional[str] = None,
         correlation_id: Optional[str] = None,
         cancellation: Optional[CancellationSignal] = None,
     ) -> Iterator[StreamEvent]:
-        request_id = str(uuid.uuid4())
-        headers: Dict[str, str] = {
+        resolved_request_id = request_id or str(uuid.uuid4())
+        headers: dict[str, str] = {
             "Accept": "text/event-stream",
             "Content-Type": "application/json",
             "User-Agent": self.config.user_agent,
             "X-API-Version": self.config.api_version,
-            "X-Request-ID": request_id,
-            "X-Correlation-ID": correlation_id or request_id,
+            "X-Request-ID": resolved_request_id,
+            "X-Correlation-ID": correlation_id or resolved_request_id,
         }
         if self.config.access_token:
             headers["Authorization"] = f"Bearer {self.config.access_token}"

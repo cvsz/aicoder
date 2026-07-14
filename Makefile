@@ -7,7 +7,7 @@ install-dev:
 	pip install -r requirements-dev.txt
 
 test:
-	pytest
+	HOME=$(CURDIR)/.test-home pytest
 
 test-cov:
 	pytest --cov --cov-report=term-missing
@@ -19,7 +19,7 @@ format:
 	black .
 
 typecheck:
-	mypy . --ignore-missing-imports
+	mypy . --ignore-missing-imports --explicit-package-bases
 
 security:
 	bandit -r . -x ./tests

@@ -116,10 +116,10 @@ Persistence  Provider   Jobs/Tools
 
 ---
 
-# NEXT ACTIVE SLICE — Phase 6.2 Plain CLI Product API Migration
+# Phase 6.2 — Product API CLI Foundation
 
-**Priority:** P0  
-**Recommended branch:** `feat/phase6-cli-product-api`
+**Status:** Partial; API-native console entrypoint and operational controls are delivered.
+**Remaining gate:** converge the primary `main.py` prompt/chat paths without reintroducing provider credentials to migrated commands.
 
 ## Objective
 
@@ -147,7 +147,7 @@ argparse command
 
 ### 6.2.2 Canonical CLI runtime
 
-Create or extend a CLI runtime that:
+The delivered API-native CLI runtime:
 
 - constructs `ProductAPIClient` from `ZAICODER_API_URL` and `ZAICODER_ACCESS_TOKEN`;
 - supports API version, timeout, retry count, request IDs, and correlation IDs;
@@ -156,7 +156,7 @@ Create or extend a CLI runtime that:
 - centralizes typed error-to-exit-code mapping;
 - redacts tokens from diagnostics.
 
-### 6.2.3 Command migration
+### Remaining 6.2.3 Command migration
 
 Migrate applicable paths:
 
@@ -170,7 +170,7 @@ Migrate applicable paths:
 
 No migrated command may instantiate `Coder`, import a provider SDK, or call a provider endpoint directly.
 
-### 6.2.4 Streaming and cancellation
+### Delivered 6.2.4 Streaming and cancellation
 
 The CLI stream path must:
 
@@ -183,7 +183,7 @@ The CLI stream path must:
 - return exit code `130` on cancellation;
 - avoid duplicate terminal output.
 
-### 6.2.5 Standard exit codes
+### Delivered 6.2.5 Standard exit codes
 
 | Condition | Exit code |
 |---|---:|
@@ -196,7 +196,7 @@ The CLI stream path must:
 | Protocol or malformed response | 7 |
 | User cancellation | 130 |
 
-### 6.2.6 Tests
+### Delivered 6.2.6 Tests
 
 Add deterministic tests without provider SDK, provider credential, network, or live Product API:
 
@@ -239,6 +239,15 @@ The slice is complete only when:
 ## Rollback
 
 Revert the CLI migration commits while retaining Product API client/server foundations. Any temporary legacy path must be explicit, disabled by default, documented, and scheduled for removal. Do not restore provider credentials to new client configuration.
+
+---
+
+# NEXT ACTIVE SLICE — Phase 6.2b Primary CLI Convergence
+
+**Priority:** P0
+**Recommended branch:** `feat/phase6-main-cli-convergence`
+
+Migrate the primary `main.py` prompt, streaming, interactive, and model-list branches to `ProductAPIClient`. Retain only explicitly documented legacy provider administration paths until equivalent Product API endpoints exist. This is the next vertical slice; do not combine it with web or automation migration.
 
 ---
 

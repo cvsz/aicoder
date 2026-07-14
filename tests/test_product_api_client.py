@@ -24,9 +24,7 @@ def test_retry_policy_requires_safe_request():
     policy = RetryPolicy(max_retries=2)
     assert policy.should_retry(method="GET", attempt=0, status_code=503)
     assert not policy.should_retry(method="POST", attempt=0, status_code=503)
-    assert policy.should_retry(
-        method="POST", attempt=0, status_code=503, idempotency_key="idem-1"
-    )
+    assert policy.should_retry(method="POST", attempt=0, status_code=503, idempotency_key="idem-1")
     assert not policy.should_retry(method="GET", attempt=0, status_code=401)
     assert not policy.should_retry(method="GET", attempt=2, status_code=503)
 
@@ -53,6 +51,22 @@ def test_transport_sets_product_headers_and_returns_json():
     assert headers["x-correlation-id"] == "corr-1"
     assert "x-request-id" in headers
     assert headers["x-api-version"] == "v1"
+
+
+def test_transport_preserves_explicit_request_and_correlation_ids():
+    captured = {}
+
+    def sender(request, timeout):
+        del timeout
+        captured["headers"] = dict(request.header_items())
+        return TransportResponse(200, {}, b'{"status":"ok"}')
+
+    transport = ProductAPITransport(ClientConfig(base_url="https://product.example"), sender=sender)
+    transport.request_json("GET", "/health", request_id="req-cli", correlation_id="corr-cli")
+
+    headers = {key.lower(): value for key, value in captured["headers"].items()}
+    assert headers["x-request-id"] == "req-cli"
+    assert headers["x-correlation-id"] == "corr-cli"
 
 
 def test_transport_retries_connection_error_for_get():
@@ -92,9 +106,7 @@ def test_transport_raises_typed_product_error():
     def sender(request, timeout):
         return TransportResponse(403, {}, body)
 
-    transport = ProductAPITransport(
-        ClientConfig(base_url="https://product.example"), sender=sender
-    )
+    transport = ProductAPITransport(ClientConfig(base_url="https://product.example"), sender=sender)
     with pytest.raises(ProductAPIError) as exc_info:
         transport.request_json("GET", "/models")
     assert exc_info.value.status_code == 403
@@ -109,13 +121,15 @@ def _wire_event(event_type, sequence, payload=None):
         "correlation_id": "corr-1",
         "payload": payload or {},
     }
-    return f"data: {json.dumps(value)}\n\n".encode("utf-8")
+    return f"data: {json.dumps(value)}\n\n".encode()
 
 
 def test_stream_parser_handles_fragmented_utf8_and_multiple_frames():
-    wire = _wire_event("stream.started", 0) + _wire_event(
-        "content.delta", 1, {"text": "สวัสดี"}
-    ) + _wire_event("stream.completed", 2)
+    wire = (
+        _wire_event("stream.started", 0)
+        + _wire_event("content.delta", 1, {"text": "สวัสดี"})
+        + _wire_event("stream.completed", 2)
+    )
     parser = EventStreamParser()
     events = []
     for chunk in (wire[:17], wire[17:61], wire[61:93], wire[93:]):

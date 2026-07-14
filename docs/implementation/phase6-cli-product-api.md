@@ -12,6 +12,9 @@
 - JSON and quiet output modes;
 - stable exit-code mapping;
 - cancellation exit code `130`;
+- CLI overrides for Product API version, timeout, and retry policy;
+- explicit request and correlation ID propagation for JSON and stream calls;
+- token-free debug diagnostics;
 - deterministic tests without provider SDK, provider credentials, or network.
 
 ## Exit codes

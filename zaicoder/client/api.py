@@ -1,7 +1,8 @@
 """Typed high-level Product API methods."""
 
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
-from typing import Any, Iterator, List, Mapping, Optional
+from typing import Any, Optional
 
 from zaicoder.domain import ModelDescriptor, StreamEvent
 
@@ -23,15 +24,34 @@ class ProductAPIClient:
     def version(self) -> Mapping[str, Any]:
         return self.transport.request_json("GET", "/version")
 
-    def list_models(self) -> List[ModelDescriptor]:
-        payload = self.transport.request_json("GET", "/models")
+    def list_models(
+        self,
+        *,
+        request_id: Optional[str] = None,
+        correlation_id: Optional[str] = None,
+    ) -> list[ModelDescriptor]:
+        payload = self.transport.request_json(
+            "GET", "/models", request_id=request_id, correlation_id=correlation_id
+        )
         data = payload.get("data") if isinstance(payload, Mapping) else None
         if not isinstance(data, list):
             raise ValueError("models response requires a data list")
         return [ModelDescriptor.from_dict(item) for item in data]
 
-    def create_message(self, payload: Mapping[str, Any]) -> Mapping[str, Any]:
-        result = self.transport.request_json("POST", "/messages", payload=payload)
+    def create_message(
+        self,
+        payload: Mapping[str, Any],
+        *,
+        request_id: Optional[str] = None,
+        correlation_id: Optional[str] = None,
+    ) -> Mapping[str, Any]:
+        result = self.transport.request_json(
+            "POST",
+            "/messages",
+            payload=payload,
+            request_id=request_id,
+            correlation_id=correlation_id,
+        )
         if not isinstance(result, Mapping):
             raise ValueError("message response must be an object")
         return result
@@ -40,6 +60,7 @@ class ProductAPIClient:
         self,
         payload: Mapping[str, object],
         *,
+        request_id: Optional[str] = None,
         correlation_id: Optional[str] = None,
         cancellation: Optional[CancellationSignal] = None,
     ) -> Iterator[StreamEvent]:
@@ -48,6 +69,7 @@ class ProductAPIClient:
         return self.stream_transport.stream_events(
             "/messages:stream",
             payload,
+            request_id=request_id,
             correlation_id=correlation_id,
             cancellation=cancellation,
         )
