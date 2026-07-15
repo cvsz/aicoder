@@ -8,6 +8,11 @@ this release; see "v1.12.0" below for exactly what came from where.
 
 ## Unreleased
 
+**Primary CLI model info migration**: `main.py --model-info ID` now reads the
+canonical Product API model catalog before legacy key resolution. The explicit
+`--model-info-legacy` option retains the previous provider-specific detail
+lookup while its extra catalog fields remain unmigrated.
+
 **Product API HTTP contract recovery**: WSGI now preserves supplied request
 and correlation IDs after header normalization, and OpenAPI contract tests
 cover the delivered message routes.

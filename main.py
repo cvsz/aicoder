@@ -393,6 +393,8 @@ def build_parser():
     mo.add_argument("--list-models-legacy", action="store_true", dest="list_models_legacy",
                     help="Include superseded (still-callable) models in --list-models' offline view")
     mo.add_argument("--model-info", metavar="ID", dest="model_info")
+    mo.add_argument("--model-info-legacy", action="store_true", dest="model_info_legacy",
+                    help="Use the legacy provider-specific model detail lookup")
     mo.add_argument("--check-deprecated", metavar="PATH", dest="check_deprecated",
                     help="Scan a file or directory for retired model ID strings and print migration targets")
     mo.add_argument("--upgrade-all", metavar="PATH", dest="upgrade_all",
@@ -918,6 +920,11 @@ def main():
         from zaicoder.main_cli import run_model_listing
         sys.exit(run_model_listing(request_id=args.request_id,
                                    correlation_id=args.correlation_id, debug=args.debug))
+
+    if args.model_info and not args.model_info_legacy:
+        from zaicoder.main_cli import run_model_info
+        sys.exit(run_model_info(args.model_info, request_id=args.request_id,
+                                correlation_id=args.correlation_id, debug=args.debug))
 
     if args.tui:
         from tui import launch_tui

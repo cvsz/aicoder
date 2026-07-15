@@ -2,7 +2,7 @@ import io
 from pathlib import Path
 
 from zaicoder.domain import ModelCapabilities, ModelDescriptor, StreamEvent, StreamEventType
-from zaicoder.main_cli import MainCLIExitCode, run_model_listing, run_prompt, run_stream
+from zaicoder.main_cli import MainCLIExitCode, run_model_info, run_model_listing, run_prompt, run_stream
 
 
 class FakeClient:
@@ -101,6 +101,34 @@ def test_main_simple_stream_uses_product_api_events_and_final_newline():
     assert client.request_context == {"request_id": "req-stream", "correlation_id": "corr-stream"}
 
 
+def test_main_model_info_uses_product_api_descriptor_and_request_context():
+    client = FakeClient()
+    stdout = io.StringIO()
+
+    result = run_model_info(
+        "model-a",
+        client=client,
+        stdout=stdout,
+        request_id="req-info",
+        correlation_id="corr-info",
+    )
+
+    assert result == MainCLIExitCode.OK
+    assert "ID:             model-a" in stdout.getvalue()
+    assert "Display name:   Model A" in stdout.getvalue()
+    assert "Context window: 200000" in stdout.getvalue()
+    assert client.request_context == {"request_id": "req-info", "correlation_id": "corr-info"}
+
+
+def test_main_model_info_returns_validation_for_unknown_model():
+    stderr = io.StringIO()
+
+    result = run_model_info("missing", client=FakeClient(), stderr=stderr)
+
+    assert result == MainCLIExitCode.VALIDATION
+    assert stderr.getvalue() == "[ERROR] Model not found: missing\n"
+
+
 def test_main_product_api_debug_reports_only_request_metadata():
     client = FakeClient()
     stderr = io.StringIO()
@@ -151,3 +179,12 @@ def test_main_dispatches_simple_stream_before_legacy_key_resolution():
     dispatch = source.index("if _is_simple_product_api_stream(sys.argv[1:]):")
     legacy_key = source.index("key   = _api_key(args)")
     assert dispatch < legacy_key
+
+
+def test_main_dispatches_model_info_before_legacy_key_resolution_and_keeps_explicit_legacy_mode():
+    source = Path("main.py").read_text(encoding="utf-8")
+
+    dispatch = source.index("if args.model_info and not args.model_info_legacy:")
+    legacy_key = source.index("key   = _api_key(args)")
+    assert dispatch < legacy_key
+    assert 'mo.add_argument("--model-info-legacy"' in source

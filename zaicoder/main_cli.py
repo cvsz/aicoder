@@ -201,3 +201,66 @@ def run_model_listing(
     except (RuntimeError, ValueError) as exc:
         print(f"[ERROR] {exc}", file=stderr)
         return int(MainCLIExitCode.VALIDATION)
+
+
+def run_model_info(
+    model_id: str,
+    *,
+    client: Any = None,
+    stdout: TextIO = sys.stdout,
+    stderr: TextIO = sys.stderr,
+    request_id: Optional[str] = None,  # noqa: UP045 - Python 3.9 compatibility
+    correlation_id: Optional[str] = None,  # noqa: UP045 - Python 3.9 compatibility
+    debug: bool = False,
+) -> int:
+    """Show one Product API model descriptor using the primary CLI."""
+    if not model_id:
+        print("[ERROR] --model-info requires a model ID", file=stderr)
+        return int(MainCLIExitCode.VALIDATION)
+
+    request_id = request_id or str(uuid.uuid4())
+    correlation_id = correlation_id or request_id
+    try:
+        if debug:
+            _write_debug(stderr, request_id=request_id, correlation_id=correlation_id)
+        api = client or build_product_api_client()
+        model = next(
+            (
+                item
+                for item in api.list_models(request_id=request_id, correlation_id=correlation_id)
+                if item.id == model_id
+            ),
+            None,
+        )
+        if model is None:
+            print(f"[ERROR] Model not found: {model_id}", file=stderr)
+            return int(MainCLIExitCode.VALIDATION)
+
+        capabilities = model.capabilities
+        features = [
+            name
+            for name, enabled in (
+                ("streaming", capabilities.streaming),
+                ("tools", capabilities.tools),
+                ("vision", capabilities.vision),
+                ("documents", capabilities.documents),
+                ("structured_output", capabilities.structured_output),
+                ("thinking", capabilities.thinking),
+            )
+            if enabled
+        ]
+        print(f"ID:             {model.id}", file=stdout)
+        print(f"Display name:   {model.display_name}", file=stdout)
+        print(f"Available:      {'yes' if model.available else 'no'}", file=stdout)
+        print(f"Context window: {capabilities.max_context_tokens or '-'}", file=stdout)
+        print(f"Max output:     {capabilities.max_output_tokens or '-'}", file=stdout)
+        print(f"Capabilities:   {', '.join(features) or '-'}", file=stdout)
+        if model.aliases:
+            print(f"Aliases:        {', '.join(model.aliases)}", file=stdout)
+        return int(MainCLIExitCode.OK)
+    except ProductAPIError as exc:
+        print(exc.envelope.error.message, file=stderr)
+        return int(_exit_for_error(exc))
+    except (RuntimeError, ValueError) as exc:
+        print(f"[ERROR] {exc}", file=stderr)
+        return int(MainCLIExitCode.VALIDATION)
