@@ -844,6 +844,12 @@ def main():
     if args.version:
         print(BANNER); return
 
+    # The default model catalog is Product API-native.  The explicitly named
+    # legacy catalog below is retained until its Product API equivalent exists.
+    if args.list_models and not args.list_models_legacy:
+        from zaicoder.main_cli import run_model_listing
+        sys.exit(run_model_listing())
+
     if args.tui:
         from tui import launch_tui
         launch_tui(api_key=key, model=model); return

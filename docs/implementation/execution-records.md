@@ -1,5 +1,19 @@
 # Migration Execution Records
 
+## 2026-07-15: Phase 6.2b primary CLI model catalog
+
+- Scope: one complete `main.py --list-models` vertical slice only.
+- Delivered: the default primary CLI model catalog now dispatches to
+  `ProductAPIClient.list_models()` before legacy provider-key resolution and
+  retains the established human-readable table.
+- Architecture: `main.py --list-models` -> `zaicoder.main_cli` ->
+  `ProductAPIClient` -> Product API -> server-only provider adapter.
+- Compatibility: `--list-models-legacy` continues through the explicitly
+  named legacy catalog branch; prompt, streaming, interactive chat, and
+  model-info remain deferred to following Phase 6.2b slices.
+- Security: the migrated adapter imports no provider SDK and reads no
+  provider credential. It uses only Product API runtime configuration.
+
 ## 2026-07-15: Phase 6.2 Product API CLI operational controls
 
 - Scope: one API-native CLI vertical slice only.
