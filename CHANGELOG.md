@@ -8,6 +8,11 @@ this release; see "v1.12.0" below for exactly what came from where.
 
 ## Unreleased
 
+**Primary CLI simple streaming migration**: plain `main.py --stream` prompt
+calls that use only `--model` and `--max-tokens` now render canonical Product
+API stream events. File, thinking, tool, and richer stream modes retain their
+existing legacy behavior until their dedicated migration slices land.
+
 **Primary CLI simple prompt migration**: plain `main.py -p/--prompt` calls
 that use only `--model`, `--max-tokens`, and `--output` now use the canonical
 Product API client. Richer or provider-specific prompt modes retain their

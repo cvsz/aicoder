@@ -1,5 +1,16 @@
 # Migration Execution Records
 
+## 2026-07-15: Phase 6.2b primary CLI simple streaming
+
+- Scope: one complete `main.py --stream -p/--prompt` vertical slice only.
+- Delivered: simple stream invocations now use `ProductAPIClient.stream_message()`,
+  render Product API content deltas, require exactly one terminal event, and
+  return cancellation exit code `130`.
+- Compatibility: file, thinking, tools, and other stream-specific legacy
+  options remain on their existing provider path until separately migrated.
+- Security: the migrated adapter imports no provider SDK and reads no
+  provider credential.
+
 ## 2026-07-15: Phase 6.2b primary CLI simple prompt
 
 - Scope: one complete `main.py -p/--prompt` vertical slice only.

@@ -86,6 +86,32 @@ def _is_simple_product_api_prompt(argv):
     return prompt_seen
 
 
+def _is_simple_product_api_stream(argv):
+    """Return true only for the deliberately migrated plain stream surface."""
+    options_with_value = {"-p", "--prompt", "--model", "--max-tokens"}
+    prompt_seen = False
+    stream_seen = False
+    index = 0
+    while index < len(argv):
+        token = argv[index]
+        if token == "--stream":
+            stream_seen = True
+        elif token.startswith("--prompt="):
+            prompt_seen = bool(token.partition("=")[2])
+        elif token.startswith("--model=") or token.startswith("--max-tokens="):
+            pass
+        elif token in options_with_value:
+            if index + 1 >= len(argv):
+                return False
+            if token in {"-p", "--prompt"}:
+                prompt_seen = bool(argv[index + 1])
+            index += 1
+        else:
+            return False
+        index += 1
+    return stream_seen and prompt_seen
+
+
 def build_parser():
     from claude_models import UPGRADE_TARGETS
     p = argparse.ArgumentParser(prog="zai-coder",
@@ -871,6 +897,10 @@ def main():
         from zaicoder.main_cli import run_prompt
         sys.exit(run_prompt(args.prompt, model=args.model, max_tokens=args.max_tokens,
                             output_path=args.output or None))
+
+    if _is_simple_product_api_stream(sys.argv[1:]):
+        from zaicoder.main_cli import run_stream
+        sys.exit(run_stream(args.prompt, model=args.model, max_tokens=args.max_tokens))
 
     # The default model catalog is Product API-native.  The explicitly named
     # legacy catalog below is retained until its Product API equivalent exists.

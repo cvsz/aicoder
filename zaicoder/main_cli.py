@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any, Optional, TextIO
 
 from zaicoder.client import ProductAPIError, build_product_api_client
+from zaicoder.domain import StreamEventType
 
 
 class MainCLIExitCode(IntEnum):
@@ -93,6 +94,65 @@ def run_prompt(
         print(exc.envelope.error.message, file=stderr)
         return int(_exit_for_error(exc))
     except (OSError, RuntimeError, ValueError) as exc:
+        print(f"[ERROR] {exc}", file=stderr)
+        return int(MainCLIExitCode.VALIDATION)
+
+
+def run_stream(
+    prompt: str,
+    *,
+    model: str,
+    max_tokens: int,
+    client: Any = None,
+    stdout: TextIO = sys.stdout,
+    stderr: TextIO = sys.stderr,
+    request_id: Optional[str] = None,  # noqa: UP045 - Python 3.9 compatibility
+    correlation_id: Optional[str] = None,  # noqa: UP045 - Python 3.9 compatibility
+) -> int:
+    """Stream a simple primary CLI prompt through canonical Product API events."""
+    if not prompt:
+        print("[ERROR] --prompt is required", file=stderr)
+        return int(MainCLIExitCode.VALIDATION)
+    if max_tokens <= 0:
+        print("[ERROR] --max-tokens must be positive", file=stderr)
+        return int(MainCLIExitCode.VALIDATION)
+
+    request_id = request_id or str(uuid.uuid4())
+    correlation_id = correlation_id or request_id
+    try:
+        api = client or build_product_api_client()
+        terminal = None
+        for event in api.stream_message(
+            {
+                "model": model,
+                "max_output_tokens": max_tokens,
+                "messages": [{"role": "user", "content": [{"type": "text", "text": prompt}]}],
+            },
+            request_id=request_id,
+            correlation_id=correlation_id,
+        ):
+            if event.type is StreamEventType.CONTENT_DELTA:
+                print(str(event.data.get("text", "")), end="", flush=True, file=stdout)
+            if event.terminal:
+                terminal = event
+
+        if terminal is None:
+            raise ValueError("stream ended without a terminal event")
+        if terminal.type is StreamEventType.STREAM_CANCELLED:
+            return 130
+        if terminal.type is StreamEventType.STREAM_FAILED:
+            print(str(terminal.data.get("message", "Product API stream failed")), file=stderr)
+            return int(
+                MainCLIExitCode.UNAVAILABLE if terminal.data.get("retryable") else MainCLIExitCode.PROTOCOL
+            )
+        print(file=stdout)
+        return int(MainCLIExitCode.OK)
+    except KeyboardInterrupt:
+        return 130
+    except ProductAPIError as exc:
+        print(exc.envelope.error.message, file=stderr)
+        return int(_exit_for_error(exc))
+    except (RuntimeError, ValueError) as exc:
         print(f"[ERROR] {exc}", file=stderr)
         return int(MainCLIExitCode.VALIDATION)
 
