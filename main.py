@@ -65,14 +65,16 @@ def _read_file(path):
 
 def _is_simple_product_api_prompt(argv):
     """Return true only for the deliberately migrated plain prompt surface."""
-    options_with_value = {"-p", "--prompt", "--model", "--max-tokens", "-o", "--output"}
+    options_with_value = {"-p", "--prompt", "--model", "--max-tokens", "-o", "--output", "--request-id", "--correlation-id"}
     prompt_seen = False
     index = 0
     while index < len(argv):
         token = argv[index]
         if token.startswith("--prompt="):
             prompt_seen = bool(token.partition("=")[2])
-        elif token.startswith("--model=") or token.startswith("--max-tokens=") or token.startswith("--output="):
+        elif token.startswith(("--model=", "--max-tokens=", "--output=", "--request-id=", "--correlation-id=")):
+            pass
+        elif token == "--debug":
             pass
         elif token in options_with_value:
             if index + 1 >= len(argv):
@@ -88,7 +90,7 @@ def _is_simple_product_api_prompt(argv):
 
 def _is_simple_product_api_stream(argv):
     """Return true only for the deliberately migrated plain stream surface."""
-    options_with_value = {"-p", "--prompt", "--model", "--max-tokens"}
+    options_with_value = {"-p", "--prompt", "--model", "--max-tokens", "--request-id", "--correlation-id"}
     prompt_seen = False
     stream_seen = False
     index = 0
@@ -98,7 +100,9 @@ def _is_simple_product_api_stream(argv):
             stream_seen = True
         elif token.startswith("--prompt="):
             prompt_seen = bool(token.partition("=")[2])
-        elif token.startswith("--model=") or token.startswith("--max-tokens="):
+        elif token.startswith(("--model=", "--max-tokens=", "--request-id=", "--correlation-id=")):
+            pass
+        elif token == "--debug":
             pass
         elif token in options_with_value:
             if index + 1 >= len(argv):
@@ -128,6 +132,9 @@ def build_parser():
     g.add_argument("--temperature", type=float, default=0.3)
     g.add_argument("--max-tokens", type=int, default=4096, dest="max_tokens")
     g.add_argument("--api-key", default="", dest="api_key")
+    g.add_argument("--request-id", dest="request_id")
+    g.add_argument("--correlation-id", dest="correlation_id")
+    g.add_argument("--debug", action="store_true")
     g.add_argument("--version", action="store_true")
     g.add_argument("--tui", action="store_true",
                    help="Launch the Master Omega TUI (interactive terminal UI)")
@@ -896,17 +903,21 @@ def main():
     if _is_simple_product_api_prompt(sys.argv[1:]):
         from zaicoder.main_cli import run_prompt
         sys.exit(run_prompt(args.prompt, model=args.model, max_tokens=args.max_tokens,
-                            output_path=args.output or None))
+                            output_path=args.output or None, request_id=args.request_id,
+                            correlation_id=args.correlation_id, debug=args.debug))
 
     if _is_simple_product_api_stream(sys.argv[1:]):
         from zaicoder.main_cli import run_stream
-        sys.exit(run_stream(args.prompt, model=args.model, max_tokens=args.max_tokens))
+        sys.exit(run_stream(args.prompt, model=args.model, max_tokens=args.max_tokens,
+                            request_id=args.request_id, correlation_id=args.correlation_id,
+                            debug=args.debug))
 
     # The default model catalog is Product API-native.  The explicitly named
     # legacy catalog below is retained until its Product API equivalent exists.
     if args.list_models and not args.list_models_legacy:
         from zaicoder.main_cli import run_model_listing
-        sys.exit(run_model_listing())
+        sys.exit(run_model_listing(request_id=args.request_id,
+                                   correlation_id=args.correlation_id, debug=args.debug))
 
     if args.tui:
         from tui import launch_tui

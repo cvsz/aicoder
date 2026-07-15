@@ -1,5 +1,17 @@
 # Final Validation Report
 
+## Phase 6.2b primary CLI request context
+
+**Status:** Focused slice checks pass. Repository-wide baseline remains red
+and is not represented as production-ready.
+
+Focused coverage verifies supplied request/correlation context and token-free
+debug diagnostics in the migrated Product API adapter.
+
+Repository gates were executed: `make format` passed (unrelated legacy
+formatting was restored), while the established baseline remains red for
+lint, type checking, and tests.
+
 ## Phase 6.2b primary CLI simple streaming
 
 **Status:** Focused slice checks pass. Repository-wide baseline remains red

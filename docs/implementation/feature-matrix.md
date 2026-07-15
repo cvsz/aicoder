@@ -9,6 +9,7 @@
 | Primary `main.py` model listing | Yes | None | Delivered | `tests/test_main_product_api_model_listing.py` |
 | Primary `main.py` simple prompt | Yes | None | Delivered | `tests/test_main_product_api_model_listing.py` |
 | Primary `main.py` simple streaming | Yes | None | Delivered | `tests/test_main_product_api_model_listing.py` |
+| Primary `main.py` Product API request context | Yes | None | Delivered | `tests/test_main_product_api_model_listing.py` |
 | Legacy `main.py` prompt/chat | No | Legacy provider configuration | Deferred | Phase 6.2b |
 | Web and automation | Not yet | Not yet | Pending | Phase 6.3 |
 
