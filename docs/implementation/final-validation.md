@@ -1,5 +1,26 @@
 # Final Validation Report
 
+## Phase 6.2b primary CLI model info
+
+**Status:** Focused slice checks pass. Repository-wide baseline remains tracked
+separately and is not represented as production-ready.
+
+| Gate | Command | Result |
+|---|---|---|
+| Focused format | `black --check zaicoder/main_cli.py tests/test_main_product_api_model_listing.py` | Pass |
+| Focused lint | `ruff check zaicoder/main_cli.py tests/test_main_product_api_model_listing.py` | Pass |
+| Focused type check | `mypy zaicoder/main_cli.py` | Pass |
+| Focused tests | `pytest -q tests/test_main_product_api_model_listing.py` | Pass: 11 tests |
+| Main CLI syntax | `python -m py_compile main.py` | Pass |
+| Format | `make format` | Pass with the repository toolchain; unrelated legacy formatting output restored from the narrow branch |
+| Lint | `make lint` | Baseline red: 910 violations outside this slice |
+| Type check | `make typecheck` | Baseline red: missing PyYAML stubs and virtualenv discovery |
+| Tests | `make test` | Baseline red: 31 stale TUI API-contract failures; 367 tests pass |
+
+The default `main.py --model-info` path uses only `ProductAPIClient`; the
+explicit `--model-info-legacy` option preserves provider-specific detail lookup
+until all legacy catalog fields are represented by the Product API.
+
 ## CI Product API HTTP contract recovery
 
 **Status:** Focused slice checks pass. Repository-wide baseline remains red

@@ -1,5 +1,16 @@
 # Migration Execution Records
 
+## 2026-07-15: Phase 6.2b primary CLI model info
+
+- Scope: one complete `main.py --model-info` vertical slice only.
+- Delivered: default model detail lookup now finds the typed Product API model
+  descriptor through `ProductAPIClient.list_models()` before legacy provider-key
+  resolution and renders deterministic capability metadata.
+- Compatibility: `--model-info-legacy` preserves the prior provider-specific
+  detail lookup until all legacy catalog fields have Product API equivalents.
+- Security: the migrated adapter imports no provider SDK and reads no provider
+  credential.
+
 ## 2026-07-15: CI Product API HTTP contract recovery
 
 - Scope: one WSGI request-context and OpenAPI contract vertical slice.

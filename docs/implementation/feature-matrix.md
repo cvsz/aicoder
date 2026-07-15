@@ -7,6 +7,7 @@
 | `zai-coder-api` request context and diagnostics | Yes | None | Delivered | `tests/test_product_api_cli.py`, `tests/test_product_api_client.py` |
 | TUI chat | Yes | None | Delivered | `tests/test_tui_product_api_migration.py` |
 | Primary `main.py` model listing | Yes | None | Delivered | `tests/test_main_product_api_model_listing.py` |
+| Primary `main.py` model info | Yes | None | Delivered | `tests/test_main_product_api_model_listing.py` |
 | Primary `main.py` simple prompt | Yes | None | Delivered | `tests/test_main_product_api_model_listing.py` |
 | Primary `main.py` simple streaming | Yes | None | Delivered | `tests/test_main_product_api_model_listing.py` |
 | Primary `main.py` Product API request context | Yes | None | Delivered | `tests/test_main_product_api_model_listing.py` |
