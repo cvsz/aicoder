@@ -8,6 +8,10 @@ this release; see "v1.12.0" below for exactly what came from where.
 
 ## Unreleased
 
+**Product API HTTP contract recovery**: WSGI now preserves supplied request
+and correlation IDs after header normalization, and OpenAPI contract tests
+cover the delivered message routes.
+
 **Primary CLI Product API request context**: migrated `main.py` commands now
 accept `--request-id`, `--correlation-id`, and token-free `--debug`
 diagnostics for Product API calls.

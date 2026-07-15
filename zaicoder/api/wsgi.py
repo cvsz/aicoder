@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from typing import Callable, Dict, Iterable, List, Mapping, Tuple
+from collections.abc import Callable, Iterable, Mapping
 
 from .application import ProductAPIRequest
 from .auth import ProductAPIHandler
 
-StartResponse = Callable[[str, List[Tuple[str, str]]], object]
+StartResponse = Callable[[str, list[tuple[str, str]]], object]
 
 _STATUS_TEXT = {
     200: "OK",
@@ -23,13 +23,17 @@ _STATUS_TEXT = {
 }
 
 
-def _request_headers(environ: Mapping[str, object]) -> Dict[str, str]:
-    headers: Dict[str, str] = {}
+def _request_headers(environ: Mapping[str, object]) -> dict[str, str]:
+    headers: dict[str, str] = {}
     for key, value in environ.items():
         if not isinstance(value, str):
             continue
         if key.startswith("HTTP_"):
             name = key[5:].replace("_", "-").title()
+            if name == "X-Request-Id":
+                name = "X-Request-ID"
+            elif name == "X-Correlation-Id":
+                name = "X-Correlation-ID"
             headers[name] = value
     if isinstance(environ.get("CONTENT_TYPE"), str):
         headers["Content-Type"] = str(environ["CONTENT_TYPE"])

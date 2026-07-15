@@ -46,7 +46,7 @@ def test_checked_in_openapi_matches_generator():
     assert checked_in == build_openapi_schema("1.23.0")
 
 
-def test_openapi_contains_only_versioned_product_routes():
+def test_openapi_contains_all_versioned_product_routes():
     schema = build_openapi_schema()
     assert set(schema["paths"]) == {
         "/v1/health",
@@ -54,5 +54,7 @@ def test_openapi_contains_only_versioned_product_routes():
         "/v1/ready",
         "/v1/version",
         "/v1/models",
+        "/v1/messages",
+        "/v1/messages:stream",
     }
     assert schema["components"]["schemas"]["ProductError"]["required"] == ["error"]
