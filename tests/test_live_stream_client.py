@@ -1,6 +1,16 @@
 import json
+from io import BytesIO
+from urllib.error import HTTPError
 
-from zaicoder.client import ClientConfig, ProductAPIClient, ProductAPIStreamTransport, ProductAPITransport
+import pytest
+
+from zaicoder.client import (
+    ClientConfig,
+    ProductAPIClient,
+    ProductAPIError,
+    ProductAPIStreamTransport,
+    ProductAPITransport,
+)
 from zaicoder.domain import ContentBlock, ContentType, Message, MessageRole, StreamEventType
 from zaicoder.providers import AnthropicGenerationAdapter, GenerationRequest
 
@@ -111,6 +121,33 @@ def test_live_stream_transport_preserves_explicit_request_context():
     headers = {key.lower(): value for key, value in captured["headers"].items()}
     assert headers["x-request-id"] == "req-cli"
     assert headers["x-correlation-id"] == "corr-cli"
+
+
+def test_live_stream_transport_maps_http_error_to_typed_product_error():
+    body = json.dumps(
+        {
+            "error": {
+                "code": "unauthenticated",
+                "message": "token required",
+                "request_id": "req-1",
+                "correlation_id": "corr-1",
+                "retryable": False,
+                "details": {},
+            }
+        }
+    ).encode()
+
+    def opener(request, timeout):
+        del request, timeout
+        raise HTTPError("https://product.invalid/v1/messages:stream", 401, "Unauthorized", {}, BytesIO(body))
+
+    transport = ProductAPIStreamTransport(ClientConfig(base_url="https://product.invalid"), opener=opener)
+
+    with pytest.raises(ProductAPIError) as exc_info:
+        list(transport.stream_events("/messages:stream", {"model": "m"}))
+
+    assert exc_info.value.status_code == 401
+    assert exc_info.value.envelope.error.code == "unauthenticated"
 
 
 def test_product_client_requires_configured_stream_transport():
