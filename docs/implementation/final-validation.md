@@ -1,5 +1,25 @@
 # Final Validation Report
 
+## CI Product API HTTP contract recovery
+
+**Status:** Focused slice checks pass. Repository-wide baseline remains red
+and is not represented as production-ready.
+
+| Gate | Command | Result |
+|---|---|---|
+| Focused format | `black --check zaicoder/api/wsgi.py tests/test_product_api_http_openapi.py` | Pass |
+| Focused lint | `ruff check zaicoder/api/wsgi.py tests/test_product_api_http_openapi.py` | Pass |
+| Focused type check | `mypy zaicoder/api/wsgi.py` | Pass |
+| Focused tests | `pytest -q tests/test_product_api_http_openapi.py` | Pass: 4 tests |
+| Format | `make format` | Pass with the repository toolchain; unrelated legacy formatting output restored from the narrow branch |
+| Lint | `make lint` | Baseline red: 910 violations outside this slice |
+| Type check | `make typecheck` | Baseline red: missing PyYAML stubs and virtualenv discovery |
+| Tests | `make test` | Baseline red: 31 stale TUI API-contract failures |
+
+This slice restores canonical `X-Request-ID` and `X-Correlation-ID` forwarding
+through WSGI and aligns the Product API OpenAPI route contract. No provider
+credential or provider SDK is introduced into the CLI.
+
 ## Phase 6.2b primary CLI request context
 
 **Status:** Focused slice checks pass. Repository-wide baseline remains red

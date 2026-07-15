@@ -80,7 +80,7 @@ class AuthMiddleware:
                 www_authenticate=True,
             )
 
-        required = frozenset()
+        required: frozenset[str] = frozenset()
         for suffix, scopes in self.REQUIRED_SCOPE_SUFFIXES.items():
             if request.path.endswith(suffix):
                 required = scopes

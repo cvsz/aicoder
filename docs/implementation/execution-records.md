@@ -1,5 +1,14 @@
 # Migration Execution Records
 
+## 2026-07-15: CI Product API HTTP contract recovery
+
+- Scope: one WSGI request-context and OpenAPI contract vertical slice.
+- Delivered: WSGI normalizes standard request/correlation header spelling so
+  supplied IDs reach the application unchanged; the OpenAPI route assertion
+  now includes delivered message and streaming endpoints.
+- Compatibility: HTTP header names remain case-insensitive as required by
+  HTTP; provider boundaries and client credential rules are unchanged.
+
 ## 2026-07-15: Phase 6.2b primary CLI request context
 
 - Scope: one request-context and diagnostics vertical slice for already
