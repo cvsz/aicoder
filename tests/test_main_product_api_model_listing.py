@@ -81,6 +81,38 @@ def test_main_simple_prompt_uses_product_api_and_preserves_output_file(tmp_path)
     assert client.request_context == {"request_id": "req-prompt", "correlation_id": "corr-prompt"}
 
 
+def test_main_file_prompt_preserves_legacy_file_content_format():
+    client = FakeClient()
+
+    result = run_prompt(
+        "summarize this",
+        model="model-a",
+        max_tokens=99,
+        file_content="alpha\nbeta",
+        client=client,
+        request_id="req-file",
+        correlation_id="corr-file",
+    )
+
+    assert result == MainCLIExitCode.OK
+    assert client.payload["messages"] == [
+        {
+            "role": "user",
+            "content": [{"type": "text", "text": "File content:\n```\nalpha\nbeta\n```\n\nsummarize this"}],
+        }
+    ]
+    assert client.request_context == {"request_id": "req-file", "correlation_id": "corr-file"}
+
+
+def test_main_file_only_prompt_is_valid_product_api_input():
+    client = FakeClient()
+
+    result = run_prompt("", model="model-a", max_tokens=99, file_content="alpha", client=client)
+
+    assert result == MainCLIExitCode.OK
+    assert client.payload["messages"][0]["content"][0]["text"] == "File content:\n```\nalpha\n```\n\n"
+
+
 def test_main_simple_stream_uses_product_api_events_and_final_newline():
     client = FakeClient()
     stdout = io.StringIO()
@@ -171,6 +203,13 @@ def test_main_dispatches_simple_prompt_before_legacy_key_resolution():
     dispatch = source.index("if _is_simple_product_api_prompt(sys.argv[1:]):")
     legacy_key = source.index("key   = _api_key(args)")
     assert dispatch < legacy_key
+
+
+def test_main_simple_product_api_prompt_accepts_file_input_without_streaming():
+    source = Path("main.py").read_text(encoding="utf-8")
+
+    assert '"-f", "--file"' in source
+    assert "file_content=_read_file(args.file) if args.file else None" in source
 
 
 def test_main_dispatches_simple_stream_before_legacy_key_resolution():

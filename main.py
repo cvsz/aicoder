@@ -65,13 +65,15 @@ def _read_file(path):
 
 def _is_simple_product_api_prompt(argv):
     """Return true only for the deliberately migrated plain prompt surface."""
-    options_with_value = {"-p", "--prompt", "--model", "--max-tokens", "-o", "--output", "--request-id", "--correlation-id"}
-    prompt_seen = False
+    options_with_value = {"-p", "--prompt", "-f", "--file", "--model", "--max-tokens", "-o", "--output", "--request-id", "--correlation-id"}
+    input_seen = False
     index = 0
     while index < len(argv):
         token = argv[index]
         if token.startswith("--prompt="):
-            prompt_seen = bool(token.partition("=")[2])
+            input_seen = bool(token.partition("=")[2]) or input_seen
+        elif token.startswith("--file="):
+            input_seen = bool(token.partition("=")[2]) or input_seen
         elif token.startswith(("--model=", "--max-tokens=", "--output=", "--request-id=", "--correlation-id=")):
             pass
         elif token == "--debug":
@@ -79,13 +81,13 @@ def _is_simple_product_api_prompt(argv):
         elif token in options_with_value:
             if index + 1 >= len(argv):
                 return False
-            if token in {"-p", "--prompt"}:
-                prompt_seen = bool(argv[index + 1])
+            if token in {"-p", "--prompt", "-f", "--file"}:
+                input_seen = bool(argv[index + 1]) or input_seen
             index += 1
         else:
             return False
         index += 1
-    return prompt_seen
+    return input_seen
 
 
 def _is_simple_product_api_stream(argv):
@@ -905,6 +907,7 @@ def main():
     if _is_simple_product_api_prompt(sys.argv[1:]):
         from zaicoder.main_cli import run_prompt
         sys.exit(run_prompt(args.prompt, model=args.model, max_tokens=args.max_tokens,
+                            file_content=_read_file(args.file) if args.file else None,
                             output_path=args.output or None, request_id=args.request_id,
                             correlation_id=args.correlation_id, debug=args.debug))
 

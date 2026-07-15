@@ -1,5 +1,16 @@
 # Migration Execution Records
 
+## 2026-07-15: Phase 6.2b primary CLI file prompt
+
+- Scope: one complete non-streaming `main.py -f/--file` prompt vertical slice.
+- Delivered: plain file-only and file-plus-prompt invocations now construct the
+  canonical Product API message before legacy provider-key resolution.
+- Compatibility: file content retains the legacy fenced `File content` format;
+  streaming file input and richer prompt options remain on their explicit
+  legacy path until separately migrated.
+- Security: the migrated adapter imports no provider SDK and reads no provider
+  credential.
+
 ## 2026-07-15: Phase 6.2b primary CLI model info
 
 - Scope: one complete `main.py --model-info` vertical slice only.

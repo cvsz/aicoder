@@ -9,6 +9,7 @@
 | Primary `main.py` model listing | Yes | None | Delivered | `tests/test_main_product_api_model_listing.py` |
 | Primary `main.py` model info | Yes | None | Delivered | `tests/test_main_product_api_model_listing.py` |
 | Primary `main.py` simple prompt | Yes | None | Delivered | `tests/test_main_product_api_model_listing.py` |
+| Primary `main.py` simple file prompt | Yes | None | Delivered | `tests/test_main_product_api_model_listing.py` |
 | Primary `main.py` simple streaming | Yes | None | Delivered | `tests/test_main_product_api_model_listing.py` |
 | Primary `main.py` Product API request context | Yes | None | Delivered | `tests/test_main_product_api_model_listing.py` |
 | Product API WSGI request context | Yes | None | Delivered | `tests/test_product_api_http_openapi.py` |

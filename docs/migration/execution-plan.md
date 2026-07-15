@@ -163,8 +163,9 @@ The delivered API-native CLI runtime:
 Migrate applicable paths:
 
 - one-shot prompt/generate; **partially delivered:** simple `-p/--prompt`
-  invocations with only model, maximum tokens, and output use
-  `ProductAPIClient`; provider-specific and richer prompt modes remain legacy;
+  invocations with only model, maximum tokens, output, and plain `-f/--file`
+  input use `ProductAPIClient`; provider-specific and richer prompt modes
+  remain legacy;
 - interactive chat;
 - streaming output; **partially delivered:** simple `--stream -p/--prompt`
   invocations with only model and maximum tokens use `ProductAPIClient`;
