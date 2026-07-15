@@ -1,5 +1,15 @@
 # Migration Execution Records
 
+## 2026-07-15: Phase 6.2b primary CLI request context
+
+- Scope: one request-context and diagnostics vertical slice for already
+  migrated primary CLI commands.
+- Delivered: `--request-id`, `--correlation-id`, and token-free `--debug`
+  diagnostics now reach the Product API model listing, simple prompt, and
+  simple streaming adapters.
+- Compatibility: non-migrated legacy paths keep their existing behavior;
+  no provider credential was added to the new flags or diagnostics.
+
 ## 2026-07-15: Phase 6.2b primary CLI simple streaming
 
 - Scope: one complete `main.py --stream -p/--prompt` vertical slice only.

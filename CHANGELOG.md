@@ -8,6 +8,10 @@ this release; see "v1.12.0" below for exactly what came from where.
 
 ## Unreleased
 
+**Primary CLI Product API request context**: migrated `main.py` commands now
+accept `--request-id`, `--correlation-id`, and token-free `--debug`
+diagnostics for Product API calls.
+
 **Primary CLI simple streaming migration**: plain `main.py --stream` prompt
 calls that use only `--model` and `--max-tokens` now render canonical Product
 API stream events. File, thinking, tool, and richer stream modes retain their

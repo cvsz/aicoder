@@ -52,6 +52,13 @@ def _assistant_text(payload: Any) -> str:
     )
 
 
+def _write_debug(stderr: TextIO, *, request_id: str, correlation_id: str) -> None:
+    print(
+        f"[DEBUG] Product API request_id={request_id} correlation_id={correlation_id}",
+        file=stderr,
+    )
+
+
 def run_prompt(
     prompt: str,
     *,
@@ -63,6 +70,7 @@ def run_prompt(
     stderr: TextIO = sys.stderr,
     request_id: Optional[str] = None,  # noqa: UP045 - Python 3.9 compatibility
     correlation_id: Optional[str] = None,  # noqa: UP045 - Python 3.9 compatibility
+    debug: bool = False,
 ) -> int:
     """Run a simple primary CLI prompt through the canonical Product API."""
     if not prompt:
@@ -75,6 +83,8 @@ def run_prompt(
     request_id = request_id or str(uuid.uuid4())
     correlation_id = correlation_id or request_id
     try:
+        if debug:
+            _write_debug(stderr, request_id=request_id, correlation_id=correlation_id)
         api = client or build_product_api_client()
         response = api.create_message(
             {
@@ -108,6 +118,7 @@ def run_stream(
     stderr: TextIO = sys.stderr,
     request_id: Optional[str] = None,  # noqa: UP045 - Python 3.9 compatibility
     correlation_id: Optional[str] = None,  # noqa: UP045 - Python 3.9 compatibility
+    debug: bool = False,
 ) -> int:
     """Stream a simple primary CLI prompt through canonical Product API events."""
     if not prompt:
@@ -120,6 +131,8 @@ def run_stream(
     request_id = request_id or str(uuid.uuid4())
     correlation_id = correlation_id or request_id
     try:
+        if debug:
+            _write_debug(stderr, request_id=request_id, correlation_id=correlation_id)
         api = client or build_product_api_client()
         terminal = None
         for event in api.stream_message(
@@ -164,11 +177,14 @@ def run_model_listing(
     stderr: TextIO = sys.stderr,
     request_id: Optional[str] = None,  # noqa: UP045 - Python 3.9 compatibility
     correlation_id: Optional[str] = None,  # noqa: UP045 - Python 3.9 compatibility
+    debug: bool = False,
 ) -> int:
     """List Product API models using the legacy CLI's human-readable layout."""
     request_id = request_id or str(uuid.uuid4())
     correlation_id = correlation_id or request_id
     try:
+        if debug:
+            _write_debug(stderr, request_id=request_id, correlation_id=correlation_id)
         api = client or build_product_api_client()
         models = api.list_models(request_id=request_id, correlation_id=correlation_id)
         print(f"\n{'MODEL ID':<35}{'DISPLAY NAME':<35}{'CONTEXT'}", file=stdout)

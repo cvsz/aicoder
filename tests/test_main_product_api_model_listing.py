@@ -101,6 +101,26 @@ def test_main_simple_stream_uses_product_api_events_and_final_newline():
     assert client.request_context == {"request_id": "req-stream", "correlation_id": "corr-stream"}
 
 
+def test_main_product_api_debug_reports_only_request_metadata():
+    client = FakeClient()
+    stderr = io.StringIO()
+
+    result = run_prompt(
+        "hi",
+        model="model-a",
+        max_tokens=99,
+        client=client,
+        stderr=stderr,
+        request_id="req-debug",
+        correlation_id="corr-debug",
+        debug=True,
+    )
+
+    assert result == MainCLIExitCode.OK
+    assert stderr.getvalue() == "[DEBUG] Product API request_id=req-debug correlation_id=corr-debug\n"
+    assert "token" not in stderr.getvalue().lower()
+
+
 def test_migrated_main_adapter_has_no_provider_credentials_or_sdk_imports():
     source = Path("zaicoder/main_cli.py").read_text(encoding="utf-8")
 
