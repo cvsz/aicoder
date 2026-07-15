@@ -114,6 +114,20 @@ def test_missing_prompt_is_validation_error():
     assert "--prompt is required" in stderr.getvalue()
 
 
+def test_invalid_runtime_overrides_are_validation_errors():
+    stderr = io.StringIO()
+
+    assert run(["-p", "hi", "--api-timeout", "0"], client=FakeClient(), stderr=stderr) == ExitCode.VALIDATION
+    assert "--api-timeout must be positive" in stderr.getvalue()
+
+    stderr = io.StringIO()
+    assert (
+        run(["-p", "hi", "--api-max-retries", "-1"], client=FakeClient(), stderr=stderr)
+        == ExitCode.VALIDATION
+    )
+    assert "--api-max-retries must be non-negative" in stderr.getvalue()
+
+
 def test_cli_source_has_no_provider_credential_or_sdk_import():
     from pathlib import Path
 

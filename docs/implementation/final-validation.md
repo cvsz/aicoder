@@ -13,12 +13,15 @@ is not represented as production-ready.
 | Tests | `make test` | Baseline red: 33 stale TUI/Product API contract failures |
 | Focused lint | `ruff check` on changed Python files | Pass |
 | Focused type check | `mypy` on changed Product API client files | Pass |
-| Focused tests | Product API CLI/client/stream tests | Pass: 22 tests |
+| Focused tests | Product API CLI/client/stream tests | Pass: 24 tests |
 
 Focused coverage verifies explicit request/correlation IDs for JSON and SSE,
 token-free debug output, Product API-only CLI imports, streaming terminal
 handling, and exit-code behavior. No live Product API, provider SDK, or
 provider credential is required.
+
+Review follow-up coverage verifies typed handling of SSE authentication errors
+and validation exit codes for invalid runtime overrides.
 
 The draft PR must not be treated as a repository-wide production readiness
 signal until the recorded baseline failures are resolved in dedicated slices.

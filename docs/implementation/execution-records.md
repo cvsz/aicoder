@@ -11,3 +11,10 @@
   generation remain unchanged. No legacy `main.py` path was altered.
 - Security: no provider SDK or provider credential was added to the CLI.
 - Deferred: primary legacy CLI convergence remains the next active slice.
+
+## 2026-07-15: Phase 6.2 review follow-up
+
+- Mapped Product API SSE `HTTPError` responses with valid error envelopes to
+  `ProductAPIError`, preserving typed CLI exit-code behavior.
+- Added validation for non-positive `--api-timeout` and negative
+  `--api-max-retries` values before client construction.
