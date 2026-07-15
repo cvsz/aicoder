@@ -9,6 +9,7 @@ from __future__ import annotations
 import sys
 import uuid
 from enum import IntEnum
+from pathlib import Path
 from typing import Any, Optional, TextIO
 
 from zaicoder.client import ProductAPIError, build_product_api_client
@@ -37,6 +38,63 @@ def _exit_for_error(error: ProductAPIError) -> MainCLIExitCode:
     if code in {"timeout", "provider_timeout"}:
         return MainCLIExitCode.TIMEOUT
     return MainCLIExitCode.PROTOCOL
+
+
+def _assistant_text(payload: Any) -> str:
+    message = payload.get("message") if isinstance(payload, dict) else None
+    if not isinstance(message, dict) or not isinstance(message.get("content"), list):
+        raise ValueError("message response requires assistant content")
+    return "".join(
+        str(block.get("text", ""))
+        for block in message["content"]
+        if isinstance(block, dict) and block.get("type") == "text"
+    )
+
+
+def run_prompt(
+    prompt: str,
+    *,
+    model: str,
+    max_tokens: int,
+    output_path: Optional[str] = None,  # noqa: UP045 - Python 3.9 compatibility
+    client: Any = None,
+    stdout: TextIO = sys.stdout,
+    stderr: TextIO = sys.stderr,
+    request_id: Optional[str] = None,  # noqa: UP045 - Python 3.9 compatibility
+    correlation_id: Optional[str] = None,  # noqa: UP045 - Python 3.9 compatibility
+) -> int:
+    """Run a simple primary CLI prompt through the canonical Product API."""
+    if not prompt:
+        print("[ERROR] --prompt is required", file=stderr)
+        return int(MainCLIExitCode.VALIDATION)
+    if max_tokens <= 0:
+        print("[ERROR] --max-tokens must be positive", file=stderr)
+        return int(MainCLIExitCode.VALIDATION)
+
+    request_id = request_id or str(uuid.uuid4())
+    correlation_id = correlation_id or request_id
+    try:
+        api = client or build_product_api_client()
+        response = api.create_message(
+            {
+                "model": model,
+                "max_output_tokens": max_tokens,
+                "messages": [{"role": "user", "content": [{"type": "text", "text": prompt}]}],
+            },
+            request_id=request_id,
+            correlation_id=correlation_id,
+        )
+        text = _assistant_text(response)
+        print(text, file=stdout)
+        if output_path:
+            Path(output_path).write_text(text, encoding="utf-8")
+        return int(MainCLIExitCode.OK)
+    except ProductAPIError as exc:
+        print(exc.envelope.error.message, file=stderr)
+        return int(_exit_for_error(exc))
+    except (OSError, RuntimeError, ValueError) as exc:
+        print(f"[ERROR] {exc}", file=stderr)
+        return int(MainCLIExitCode.VALIDATION)
 
 
 def run_model_listing(

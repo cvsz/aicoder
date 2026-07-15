@@ -1,5 +1,25 @@
 # Final Validation Report
 
+## Phase 6.2b primary CLI simple prompt
+
+**Status:** Focused slice checks pass. Repository-wide baseline remains red
+and is not represented as production-ready.
+
+| Gate | Command | Result |
+|---|---|---|
+| Focused format | `black --check zaicoder/main_cli.py tests/test_main_product_api_model_listing.py` | Pass |
+| Focused lint | `ruff check zaicoder/main_cli.py tests/test_main_product_api_model_listing.py` | Pass |
+| Focused type check | `mypy zaicoder/main_cli.py` | Pass |
+| Focused tests | `pytest tests/test_main_product_api_model_listing.py tests/test_product_api_cli.py` | Pass: 15 tests |
+| Format | `make format` | Pass; unrelated legacy formatting output restored from the narrow branch |
+| Lint | `make lint` | Baseline red: 918 pre-existing violations outside this slice |
+| Type check | `make typecheck` | Baseline red: missing PyYAML stub and virtualenv discovery |
+| Tests | `make test` | Baseline red: 33 stale Product API/TUI contract failures |
+
+The focused suite covers canonical request construction, deterministic text
+and output-file behavior, request context, and dispatch before legacy key
+resolution. It also verifies the migrated adapter stays provider-neutral.
+
 ## Phase 6.2b primary CLI model catalog
 
 **Status:** Focused slice checks pass. Repository-wide baseline remains red

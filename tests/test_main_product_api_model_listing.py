@@ -2,7 +2,7 @@ import io
 from pathlib import Path
 
 from zaicoder.domain import ModelCapabilities, ModelDescriptor
-from zaicoder.main_cli import MainCLIExitCode, run_model_listing
+from zaicoder.main_cli import MainCLIExitCode, run_model_listing, run_prompt
 
 
 class FakeClient:
@@ -18,6 +18,11 @@ class FakeClient:
                 ModelCapabilities(max_context_tokens=200_000),
             )
         ]
+
+    def create_message(self, payload, **request_context):
+        self.payload = payload
+        self.request_context = request_context
+        return {"message": {"content": [{"type": "text", "text": "hello"}]}}
 
 
 def test_main_model_listing_uses_product_api_and_legacy_layout():
@@ -38,6 +43,33 @@ def test_main_model_listing_uses_product_api_and_legacy_layout():
     assert client.request_context == {"request_id": "req-main", "correlation_id": "corr-main"}
 
 
+def test_main_simple_prompt_uses_product_api_and_preserves_output_file(tmp_path):
+    client = FakeClient()
+    stdout = io.StringIO()
+    output = tmp_path / "answer.txt"
+
+    result = run_prompt(
+        "hi",
+        model="model-a",
+        max_tokens=99,
+        output_path=str(output),
+        client=client,
+        stdout=stdout,
+        request_id="req-prompt",
+        correlation_id="corr-prompt",
+    )
+
+    assert result == MainCLIExitCode.OK
+    assert stdout.getvalue() == "hello\n"
+    assert output.read_text(encoding="utf-8") == "hello"
+    assert client.payload == {
+        "model": "model-a",
+        "max_output_tokens": 99,
+        "messages": [{"role": "user", "content": [{"type": "text", "text": "hi"}]}],
+    }
+    assert client.request_context == {"request_id": "req-prompt", "correlation_id": "corr-prompt"}
+
+
 def test_migrated_main_adapter_has_no_provider_credentials_or_sdk_imports():
     source = Path("zaicoder/main_cli.py").read_text(encoding="utf-8")
 
@@ -50,5 +82,13 @@ def test_main_dispatches_default_model_listing_before_legacy_key_resolution():
     source = Path("main.py").read_text(encoding="utf-8")
 
     dispatch = source.index("if args.list_models and not args.list_models_legacy:")
+    legacy_key = source.index("key   = _api_key(args)")
+    assert dispatch < legacy_key
+
+
+def test_main_dispatches_simple_prompt_before_legacy_key_resolution():
+    source = Path("main.py").read_text(encoding="utf-8")
+
+    dispatch = source.index("if _is_simple_product_api_prompt(sys.argv[1:]):")
     legacy_key = source.index("key   = _api_key(args)")
     assert dispatch < legacy_key

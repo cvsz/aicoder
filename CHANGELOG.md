@@ -8,6 +8,11 @@ this release; see "v1.12.0" below for exactly what came from where.
 
 ## Unreleased
 
+**Primary CLI simple prompt migration**: plain `main.py -p/--prompt` calls
+that use only `--model`, `--max-tokens`, and `--output` now use the canonical
+Product API client. Richer or provider-specific prompt modes retain their
+existing legacy behavior until their dedicated migration slices land.
+
 **Primary CLI model catalog migration**: `main.py --list-models` now uses the
 canonical Product API client and Product API runtime configuration, before any
 legacy provider-key lookup. The explicitly named `--list-models-legacy` path

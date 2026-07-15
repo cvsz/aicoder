@@ -1,5 +1,17 @@
 # Migration Execution Records
 
+## 2026-07-15: Phase 6.2b primary CLI simple prompt
+
+- Scope: one complete `main.py -p/--prompt` vertical slice only.
+- Delivered: invocations using only prompt, model, maximum tokens, and output
+  now call `ProductAPIClient.create_message()` before legacy provider-key
+  resolution and preserve text output-file behavior.
+- Compatibility: any prompt invocation using provider-specific or unmigrated
+  options remains on its existing legacy path. Streaming, interactive chat,
+  files, skills, agents, temperature, and provider-key input are deferred.
+- Security: the migrated adapter imports no provider SDK and reads no
+  provider credential.
+
 ## 2026-07-15: Phase 6.2b primary CLI model catalog
 
 - Scope: one complete `main.py --list-models` vertical slice only.
