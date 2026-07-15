@@ -8,6 +8,10 @@ this release; see "v1.12.0" below for exactly what came from where.
 
 ## Unreleased
 
+**Primary CLI file prompt migration**: plain `main.py -f/--file` generation
+now uses the canonical Product API client and preserves the legacy fenced file
+content format. Streaming file input and richer prompt modes remain legacy.
+
 **Primary CLI model info migration**: `main.py --model-info ID` now reads the
 canonical Product API model catalog before legacy key resolution. The explicit
 `--model-info-legacy` option retains the previous provider-specific detail

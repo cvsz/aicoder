@@ -64,6 +64,7 @@ def run_prompt(
     *,
     model: str,
     max_tokens: int,
+    file_content: Optional[str] = None,  # noqa: UP045 - Python 3.9 compatibility
     output_path: Optional[str] = None,  # noqa: UP045 - Python 3.9 compatibility
     client: Any = None,
     stdout: TextIO = sys.stdout,
@@ -73,8 +74,8 @@ def run_prompt(
     debug: bool = False,
 ) -> int:
     """Run a simple primary CLI prompt through the canonical Product API."""
-    if not prompt:
-        print("[ERROR] --prompt is required", file=stderr)
+    if not prompt and not file_content:
+        print("[ERROR] --prompt or --file is required", file=stderr)
         return int(MainCLIExitCode.VALIDATION)
     if max_tokens <= 0:
         print("[ERROR] --max-tokens must be positive", file=stderr)
@@ -82,6 +83,9 @@ def run_prompt(
 
     request_id = request_id or str(uuid.uuid4())
     correlation_id = correlation_id or request_id
+    user_text = prompt
+    if file_content:
+        user_text = f"File content:\n```\n{file_content}\n```\n\n{prompt}"
     try:
         if debug:
             _write_debug(stderr, request_id=request_id, correlation_id=correlation_id)
@@ -90,7 +94,7 @@ def run_prompt(
             {
                 "model": model,
                 "max_output_tokens": max_tokens,
-                "messages": [{"role": "user", "content": [{"type": "text", "text": prompt}]}],
+                "messages": [{"role": "user", "content": [{"type": "text", "text": user_text}]}],
             },
             request_id=request_id,
             correlation_id=correlation_id,
