@@ -63,6 +63,29 @@ def _read_file(path):
         sys.exit(1)
 
 
+def _is_simple_product_api_prompt(argv):
+    """Return true only for the deliberately migrated plain prompt surface."""
+    options_with_value = {"-p", "--prompt", "--model", "--max-tokens", "-o", "--output"}
+    prompt_seen = False
+    index = 0
+    while index < len(argv):
+        token = argv[index]
+        if token.startswith("--prompt="):
+            prompt_seen = bool(token.partition("=")[2])
+        elif token.startswith("--model=") or token.startswith("--max-tokens=") or token.startswith("--output="):
+            pass
+        elif token in options_with_value:
+            if index + 1 >= len(argv):
+                return False
+            if token in {"-p", "--prompt"}:
+                prompt_seen = bool(argv[index + 1])
+            index += 1
+        else:
+            return False
+        index += 1
+    return prompt_seen
+
+
 def build_parser():
     from claude_models import UPGRADE_TARGETS
     p = argparse.ArgumentParser(prog="zai-coder",
@@ -843,6 +866,11 @@ def main():
 
     if args.version:
         print(BANNER); return
+
+    if _is_simple_product_api_prompt(sys.argv[1:]):
+        from zaicoder.main_cli import run_prompt
+        sys.exit(run_prompt(args.prompt, model=args.model, max_tokens=args.max_tokens,
+                            output_path=args.output or None))
 
     # The default model catalog is Product API-native.  The explicitly named
     # legacy catalog below is retained until its Product API equivalent exists.
