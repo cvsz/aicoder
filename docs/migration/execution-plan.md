@@ -118,8 +118,10 @@ Persistence  Provider   Jobs/Tools
 
 # Phase 6.2 — Product API CLI Foundation
 
-**Status:** Partial; API-native console entrypoint and operational controls are delivered.
-**Remaining gate:** converge the primary `main.py` prompt/chat paths without reintroducing provider credentials to migrated commands.
+**Status:** Partial; API-native console entrypoint, operational controls, and
+the primary CLI model catalog are delivered.
+**Remaining gate:** converge the primary `main.py` prompt/chat paths without
+reintroducing provider credentials to migrated commands.
 
 ## Objective
 
@@ -164,7 +166,9 @@ Migrate applicable paths:
 - interactive chat;
 - streaming output;
 - continuation/history input where currently supported;
-- model listing exposed by the main CLI;
+- model listing exposed by the main CLI; **delivered:** `--list-models` now
+  uses `ProductAPIClient`; `--list-models-legacy` remains the explicitly
+  named temporary legacy catalog path;
 - JSON output;
 - quiet and debug modes.
 

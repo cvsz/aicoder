@@ -8,6 +8,11 @@ this release; see "v1.12.0" below for exactly what came from where.
 
 ## Unreleased
 
+**Primary CLI model catalog migration**: `main.py --list-models` now uses the
+canonical Product API client and Product API runtime configuration, before any
+legacy provider-key lookup. The explicitly named `--list-models-legacy` path
+is retained while the legacy catalog is still needed.
+
 **Product API CLI operational controls**: `zai-coder-api` now accepts
 `--api-version`, `--api-timeout`, `--api-max-retries`, `--request-id`, and
 `--correlation-id`. The canonical client preserves supplied request context
